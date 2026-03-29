@@ -1,0 +1,88 @@
+## todo next
+- better resume (what is this?) (locally stored sessions for stateless llm apis?)
+- hanging agent menu
+
+## todo goodies
+- [x] kaomojis for ...thinking... (╯°益°)╯彡┻━┻
+    - https://web.archive.org/web/20260318020449/https://kaomoji.you/en/ 
+    - [] add more animations
+    - [] add flavour text (combobuluation ... )
+    - [x] add colours
+    - [x] /tableflip command
+    - [] show other animations with commands?
+    - [x] time in m and s
+- [] clawd svg
+- [] bridge svg logo?
+
+## potential features
+
+### easy
+- install to selected shells, how to detect installed shells?
+- tok/s? backend agnostic?
+- quiet should have tool calls listed?
+
+### medium
+- support other shells? (nushell?) powershell...
+- markdown rendering (tables at the very least)
+
+### hard
+- mermaid graphs render in cli? hardware enabled image?
+- smart permissions mode (llm sets it own perms (dangerous.. but less so than full auto?))
+
+- [] non claude backend -> custom agent harness? (stripped down hermes?) 
+    - [x] medium qwen3.5-30b-a3b 
+    - [] small 7-14b
+    - [] tiny 1-3b
+    - [] nano 0.5b
+    - [] pico 50-300m apple neural engine accel? custom shell agent? (the data transfomration pipeline squeeze out the hardware to the max on m1 chip)
+the point is that we are testing this with claude but the real killer is a composable agentic shell program running on something like ANE and trained exactly
+
+we have discovered that the agent harness is just the UNIX environment:
+- sh    (1977 - C) shell environment
+- perl  (1987 - C) text processing
+- curl  (1998 - C) networking
+for this environment using RL... (forgot what to say)
+
+## known issues
+- writing to root /tmp/c when given ./tmp/c (haiku) (bandaid fix to base model behavior)
+- column length issue with spinner and time
+- no streaming from llama server
+
+
+----
+
+
+## done
+- [x] prototype the shell
+- [x] fix punctiation issues after ? (interactive mode)
+- [x] refactor to bridge, server and shell. bridge being the engine, server and shell being the two applications
+- [x] execute bash commands
+- [x] perms mini tui fix
+- [x] chaining posix commands, pipes and other normal bash stuff integrated
+    - [] play with this more for edge cases
+- [x] clean up server mode step 1 (naive refactor)
+- [x] simple unit test suite
+- [x] get all claude code commands working
+    - [x] status, context, etc
+    - [x] set effort, model, perms etc
+    - [x] set custom lines to be read verbose vs short vs middle?
+    - [x] cleanup help
+    - [x] state toggle, /new vs /resume
+    - [x] last message copy
+    - [] chaining giverny commands ex ? /keep /new
+    - [] anything else?
+- [x] show if hanging or thinking or tool call
+- [x] clean up shell mode step 1 (naive refactor)
+- [x] ~ home root config, default/global/local
+- [x] better setup
+    - [x] install with config setup walkthrough
+    - [x] uninstall 
+- [x] install script (local dev mode / curl install.sh)
+- [x] tigthen up export <|user|> <|assistant|>? better?
+- [x] cut out useless tests (138 in 38 ms is fine tbh)
+- [x] better readme
+- [x] characters that don't work in bash zsh or fish (shell escaping)
+- [x] how to take what is in clipboard and into prompt (wl-paste)
+- [x] figure out nvim combination (:! and :term)
+- [x] backend becomes modular and pluginable in the future
+- [x] llama-server support

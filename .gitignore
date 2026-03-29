@@ -1,0 +1,4 @@
+.claude/
+.giverny*
+tmp/
+agent_harness_analysis/
