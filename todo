@@ -86,3 +86,4 @@ for this environment using RL... (forgot what to say)
 - [x] figure out nvim combination (:! and :term)
 - [x] backend becomes modular and pluginable in the future
 - [x] llama-server support
+
