@@ -1,0 +1,14 @@
+{
+  "name": "giverny",
+  "version": "0.1.0",
+  "description": "Bridge that lets Hermes Agent use Claude Max via claude -p",
+  "bin": {
+    "giverny": "run.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "test:unit": "bun test tests/config.test.ts tests/bridge.test.ts tests/protocol.test.ts tests/shell-utils.test.ts",
+    "test:integration": "bun test tests/server.test.ts"
+  }
+}
