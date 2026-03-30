@@ -261,7 +261,7 @@ export class Bridge {
                 return {
                     text: "",
                     toolUseBlocks: [],
-                    sessionId: null,
+                    sessionId: genResult.sessionId || null,
                     durationMs: null,
                     numTurns: 0,
                     usage: null,
@@ -272,7 +272,7 @@ export class Bridge {
             return {
                 text: "",
                 toolUseBlocks: [],
-                sessionId: null,
+                sessionId: genResult.sessionId || null,
                 durationMs: null,
                 numTurns: 0,
                 usage: null,

@@ -130,8 +130,10 @@ async function generate(
     let fullText = "";
     const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> = new Map();
 
+    let streamDone = false;
+
     try {
-        while (true) {
+        while (!streamDone) {
             const { done, value } = await reader.read();
             if (done) break;
 
@@ -145,7 +147,7 @@ async function generate(
                 if (!data) continue;
 
                 const chunk = parseSSEChunk(data);
-                if (chunk.done) break;
+                if (chunk.done) { streamDone = true; break; }
 
                 if (chunk.text) {
                     fullText += chunk.text;

@@ -113,6 +113,7 @@ export function isProcessControl(control: AbortControl): control is ProcessContr
 export interface GenerateResult {
     ok: boolean;
     error?: string;
+    sessionId?: string; // captured from init event, available even on abort
 }
 
 // Collected result from a full invocation (Bridge layer)

@@ -7,7 +7,7 @@
 // JSON persistence helpers ------------------------------------------------- /
 // Generic load/save for the repeated pattern across config, usage, sessions.
 
-import { mkdirSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync, openSync, readSync, closeSync } from "fs";
 import { join } from "path";
 
 const HOME = process.env.HOME || "~";
@@ -118,7 +118,7 @@ export function isSafeBashCommand(command: string): boolean {
 
 export function needsPermission(toolName: string, input?: Record<string, any>): boolean {
     if (SAFE_TOOLS.has(toolName)) return false;
-    if (toolName === "Bash" && input?.command && isSafeBashCommand(input.command)) return false;
+    if ((toolName === "Bash" || toolName === "exec") && input?.command && isSafeBashCommand(input.command)) return false;
     return true;
 }
 
@@ -269,6 +269,7 @@ export function formatTokens(n: number): string {
 
 export const TOOL_SUMMARIES: Record<string, (input: any) => string> = {
     Bash: (i) => i.command?.slice(0, 80) || "",
+    exec: (i) => i.command?.slice(0, 80) || "",
     Read: (i) => i.file_path || "",
     Write: (i) => i.file_path || "",
     Edit: (i) => i.file_path || "",
@@ -280,4 +281,79 @@ export const TOOL_SUMMARIES: Record<string, (input: any) => string> = {
 
 export function summarizeTool(name: string, input: any): string {
     return (TOOL_SUMMARIES[name] || ((i: any) => JSON.stringify(i).slice(0, 80)))(input);
+}
+
+// ANSI constants ----------------------------------------------------------- /
+
+export const DIM = "\x1b[2m";
+export const RED = "\x1b[31m";
+export const BOLD = "\x1b[1m";
+export const ORANGE = "\x1b[38;2;255;175;135m";
+export const SEA_GREEN = "\x1b[38;5;43m";
+export const BLUE = "\x1b[38;5;75m";
+export const RESET = "\x1b[0m";
+export const INV = "\x1b[7m";
+
+// Output routing ----------------------------------------------------------- /
+// When stdout is piped (e.g. `? explain | wl-copy`), decoration goes to
+// stderr so the pipe gets clean text only.
+
+export const PIPED = !process.stdout.isTTY;
+export const ui = PIPED ? process.stderr : process.stdout;
+
+// Permission prompt -------------------------------------------------------- /
+// Compact horizontal selector with arrow key navigation.
+// Enter = confirm (default: allow), 1/2/3 direct select, Esc/Ctrl+C = deny.
+
+export function promptPermission(toolName: string, defaultDeny = false): "allow" | "tool" | "deny" {
+    const options = ["allow", `allow all ${toolName}`, "deny"];
+    let sel = defaultDeny ? 2 : 0;
+
+    // Save terminal settings, switch to raw mode for key-by-key input
+    const saved = Bun.spawnSync(["stty", "-F", "/dev/tty", "-g"]).stdout.toString().trim();
+    Bun.spawnSync(["stty", "-F", "/dev/tty", "raw", "-echo"]);
+
+    const fd = openSync("/dev/tty", "r");
+
+    const render = () => {
+        let line = "  ";
+        for (let i = 0; i < options.length; i++) {
+            line += i === sel
+                ? `${INV} ${i + 1}. ${options[i]} ${RESET} `
+                : `${DIM} ${i + 1}. ${options[i]} ${RESET} `;
+        }
+        ui.write(`\r\x1b[K${line}`);
+    };
+
+    render();
+
+    try {
+        while (true) {
+            const buf = Buffer.alloc(8);
+            const n = readSync(fd, buf);
+            const key = buf.toString("utf8", 0, n);
+
+            if (key === "\r" || key === "\n") break;          // Enter → confirm
+            if (key === "1") { sel = 0; break; }              // direct select
+            if (key === "2") { sel = 1; break; }
+            if (key === "3") { sel = 2; break; }
+            if (key === "\x1b[C" || key === "\x1b[B") {       // right / down
+                sel = Math.min(sel + 1, 2); render();
+            }
+            if (key === "\x1b[D" || key === "\x1b[A") {       // left / up
+                sel = Math.max(sel - 1, 0); render();
+            }
+            if (key === "\x03" || key === "\x1b") {            // Ctrl+C / Esc → deny
+                sel = 2; break;
+            }
+        }
+    } finally {
+        closeSync(fd);
+        Bun.spawnSync(["stty", "-F", "/dev/tty", saved]);
+    }
+
+    // Replace prompt line with the chosen option
+    const color = sel === 2 ? RED : DIM;
+    ui.write(`\r\x1b[K  ${color}${options[sel]}${RESET}\n`);
+    return (["allow", "tool", "deny"] as const)[sel];
 }

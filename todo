@@ -2,12 +2,14 @@
 - [] better resume (what is this?) 
     - [] claude code and giverny interchangeable
     - [] locally stored sessions for stateless llm apis?
-- [] hanging agent menu
-- [] split shell up into modular
+- [x] hanging agent menu (really it just hangs after tool calls for some reason)
+    - [x] claude
+    - [x] v1/completions server
+- [x] split shell up into modular
 - [] general refactor
-- [] bound scope of v0
-- [] bound scope of v1
-- [] bound scope of v2 rust rewrite
+- [x] bound scope of v0
+- [x] bound scope of v1
+- [x] bound scope of v2 rust rewrite
 
 ## todo goodies
 - [x] kaomojis for ...thinking... (╯°益°)╯彡┻━┻
@@ -99,3 +101,13 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
 - [x] figure out nvim combination (:! and :term)
 - [x] backend becomes modular and pluginable in the future
 - [x] llama-server support
+
+--- 
+
+## scope 
+
+v0 use giverny as a first class cli ux for the claude code agent harness
+
+v1 point giverny at any LLM completions api to use any model
+
+v2 rust rewrite | shell RL pico model

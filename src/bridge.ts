@@ -185,6 +185,8 @@ async function generate(
     const reader = proc.stdout.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let sessionId: string | undefined;
+    let gotResult = false;
 
     try {
         while (true) {
@@ -196,29 +198,38 @@ async function generate(
             buffer = lines.pop() || "";
 
             for (const line of lines) {
+                // Grab session_id from init event (first line) before parsing
+                if (!sessionId && line.includes('"session_id"')) {
+                    try { sessionId = JSON.parse(line).session_id; } catch {}
+                }
                 const event = parseNdjsonLine(line);
-                if (event) onEvent(event, control);
+                if (event) {
+                    onEvent(event, control);
+                    if (event.type === "result") gotResult = true;
+                }
             }
-        }
-
-        // Flush remaining buffer
-        if (buffer.trim()) {
-            const event = parseNdjsonLine(buffer);
-            if (event) onEvent(event, control);
+            // result event = done, don't wait for process to linger
+            if (gotResult) break;
         }
     } finally {
         reader.releaseLock();
         clearTimeout(timer);
     }
 
+    if (gotResult) {
+        // Clean up without blocking — process may linger after result
+        proc.kill();
+        return { ok: true, sessionId };
+    }
+
     const stderr = await new Response(proc.stderr).text();
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
-        return { ok: false, error: stderr || `claude exited with code ${exitCode}` };
+        return { ok: false, sessionId, error: stderr || `claude exited with code ${exitCode}` };
     }
 
-    return { ok: true };
+    return { ok: true, sessionId };
 }
 
 // Status check ------------------------------------------------------------ //

@@ -1,4 +1,7 @@
 .claude/
 .giverny*
 tmp/
+
+# research into similar tools
 agent_harness_analysis/
+cli_llm_analysis
