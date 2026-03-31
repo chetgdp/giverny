@@ -36,10 +36,13 @@ function buildMessages(opts: GenerateOptions): any[] {
     return messages;
 }
 
-// Parse an SSE data line into content delta and tool call fragments
+// Parse an SSE data line into content delta and tool call fragments.
+// Content is extracted BEFORE checking finish_reason so the last chunk's
+// delta isn't silently dropped.
 function parseSSEChunk(data: string): {
     text?: string;
     toolCalls?: Array<{ index: number; id?: string; name?: string; arguments?: string }>;
+    finishReason?: string;
     done: boolean;
 } {
     if (data === "[DONE]") return { done: true };
@@ -49,18 +52,17 @@ function parseSSEChunk(data: string): {
         const choice = json.choices?.[0];
         if (!choice) return { done: false };
 
-        if (choice.finish_reason) return { done: true };
-
         const delta = choice.delta;
-        if (!delta) return { done: false };
+        const result: ReturnType<typeof parseSSEChunk> = {
+            done: !!choice.finish_reason,
+        };
+        if (choice.finish_reason) result.finishReason = choice.finish_reason;
 
-        const result: ReturnType<typeof parseSSEChunk> = { done: false };
-
-        if (delta.content) {
+        if (delta?.content) {
             result.text = delta.content;
         }
 
-        if (delta.tool_calls) {
+        if (delta?.tool_calls) {
             result.toolCalls = delta.tool_calls.map((tc: any) => ({
                 index: tc.index ?? 0,
                 id: tc.id,
@@ -128,13 +130,22 @@ async function generate(
 
     // Accumulate streamed content
     let fullText = "";
+    let finishReason: string | undefined;
     const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> = new Map();
 
     let streamDone = false;
 
+    // Safety valve: if llama-server stops sending data without closing
+    // the connection or sending [DONE], don't hang forever.
+    const READ_TIMEOUT_MS = 30_000;
+
     try {
         while (!streamDone) {
-            const { done, value } = await reader.read();
+            const readPromise = reader.read();
+            const timeout = new Promise<{ done: true; value: undefined }>(
+                (resolve) => setTimeout(() => resolve({ done: true, value: undefined }), READ_TIMEOUT_MS),
+            );
+            const { done, value } = await Promise.race([readPromise, timeout]);
             if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
@@ -147,8 +158,9 @@ async function generate(
                 if (!data) continue;
 
                 const chunk = parseSSEChunk(data);
-                if (chunk.done) { streamDone = true; break; }
 
+                // Accumulate content BEFORE checking done — the final chunk
+                // can carry both finish_reason and a content delta.
                 if (chunk.text) {
                     fullText += chunk.text;
                 }
@@ -166,6 +178,12 @@ async function generate(
                             });
                         }
                     }
+                }
+
+                if (chunk.done) {
+                    finishReason = chunk.finishReason;
+                    streamDone = true;
+                    break;
                 }
             }
         }

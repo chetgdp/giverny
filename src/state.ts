@@ -3,7 +3,7 @@
 // All .giverny/ file I/O lives here.
 
 import { join } from "path";
-import { mkdirSync } from "fs";
+import { mkdirSync, readdirSync, statSync } from "fs";
 import { CONFIG_DEFAULTS, type ShellConfig } from "./config";
 import { loadJSON, saveJSON } from "./shell-utils";
 
@@ -129,3 +129,115 @@ export async function saveApproved(tools: Set<string>) {
     mkdirSync(GIVERNY_DIR, { recursive: true });
     await Bun.write(APPROVED_FILE, [...tools].join("\n") + "\n");
 }
+
+// Session discovery -------------------------------------------------------- /
+// Reads directly from Claude Code's session storage (~/.claude/projects/)
+// so giverny and claude code share the same session pool.
+
+const HOME = process.env.HOME || "~";
+const CLAUDE_PROJECTS_DIR = join(HOME, ".claude", "projects");
+
+// Claude Code encodes cwd by replacing / with -
+// /home/user/code/project → -home-user-code-project
+function claudeProjectDir(): string {
+    const encoded = process.cwd().replace(/\//g, "-");
+    return join(CLAUDE_PROJECTS_DIR, encoded);
+}
+
+export interface DiscoveredSession {
+    id: string;
+    ts: string;
+    active: boolean;
+    prompt?: string;
+    slug?: string;
+    origin?: "claude" | "giverny";
+}
+
+// Read first ~4KB of a JSONL to extract session metadata.
+// Prioritizes user message (has entrypoint, slug) over queue-operation fallback.
+async function readSessionHeader(path: string): Promise<{
+    ts?: string;
+    prompt?: string;
+    slug?: string;
+    entrypoint?: string;
+}> {
+    try {
+        const chunk = await Bun.file(path).slice(0, 4096).text();
+        const lines = chunk.split("\n").filter(Boolean);
+
+        // First pass: look for user message (richest metadata)
+        let fallbackTs: string | undefined;
+        let fallbackPrompt: string | undefined;
+        for (const line of lines.slice(0, 8)) {
+            try {
+                const data = JSON.parse(line);
+                if (data.type === "user" && data.message?.role === "user") {
+                    const content = typeof data.message.content === "string"
+                        ? data.message.content : "";
+                    // Strip XML blocks entirely (command wrappers, caveats, etc.)
+                    const clean = content.replace(/<[^>]*>[^<]*<\/[^>]*>/g, "")
+                                         .replace(/<[^>]+>/g, "")
+                                         .trim();
+                    return {
+                        ts: data.timestamp,
+                        prompt: clean.slice(0, 80) || undefined,
+                        slug: data.slug || undefined,
+                        entrypoint: data.entrypoint,
+                    };
+                }
+                // Stash queue-operation as fallback
+                if (!fallbackTs && data.type === "queue-operation" && data.operation === "enqueue") {
+                    fallbackTs = data.timestamp;
+                    fallbackPrompt = typeof data.content === "string"
+                        ? data.content.slice(0, 80) : undefined;
+                }
+            } catch {}
+        }
+        // No user message found — use queue-operation data
+        if (fallbackTs) return { ts: fallbackTs, prompt: fallbackPrompt };
+    } catch {}
+    return {};
+}
+
+// Discover all sessions from Claude Code's storage, merged with giverny's active pointer.
+// Uses file mtime for sorting (free from readdir), only reads JSONL headers for
+// the N sessions actually displayed — avoids touching 100+ files.
+export async function discoverSessions(limit = 20): Promise<{ sessions: DiscoveredSession[]; total: number }> {
+    const projectDir = claudeProjectDir();
+    const activeId = await loadSession();
+
+    let entries: { id: string; mtime: number }[];
+    try {
+        entries = readdirSync(projectDir)
+            .filter(f => f.endsWith(".jsonl"))
+            .map(f => ({
+                id: f.replace(".jsonl", ""),
+                mtime: statSync(join(projectDir, f)).mtimeMs,
+            }));
+    } catch {
+        return [];
+    }
+
+    // Sort by mtime descending — most recent first, no JSONL reads needed
+    entries.sort((a, b) => b.mtime - a.mtime);
+
+    // Only read headers for the slice we'll display
+    const top = entries.slice(0, limit);
+    const sessions = await Promise.all(
+        top.map(async (entry): Promise<DiscoveredSession> => {
+            const meta = await readSessionHeader(join(projectDir, entry.id + ".jsonl"));
+            return {
+                id: entry.id,
+                ts: meta.ts || new Date(entry.mtime).toISOString(),
+                active: entry.id === activeId,
+                prompt: meta.prompt,
+                slug: meta.slug,
+                origin: meta.entrypoint === "sdk-cli" ? "giverny" : "claude",
+            };
+        })
+    );
+
+    return { sessions, total: entries.length };
+}
+
+export { claudeProjectDir };

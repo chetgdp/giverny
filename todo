@@ -1,15 +1,10 @@
 ## todo next
 - [] better resume (what is this?) 
-    - [] claude code and giverny interchangeable
+    - [x] claude code and giverny interchangeable
     - [] locally stored sessions for stateless llm apis?
-- [x] hanging agent menu (really it just hangs after tool calls for some reason)
-    - [x] claude
-    - [x] v1/completions server
-- [x] split shell up into modular
 - [] general refactor
-- [x] bound scope of v0
-- [x] bound scope of v1
-- [x] bound scope of v2 rust rewrite
+- [] llama-server should not be called that, the feature can hit any openai api?
+- [] base system prompt
 
 ## todo goodies
 - [x] kaomojis for ...thinking... (╯°益°)╯彡┻━┻
@@ -22,6 +17,11 @@
     - [x] time in m and s
 - [] clawd svg
 - [] bridge svg logo?
+
+## scope 
+- v0 use giverny as a first class cli ux for the claude code agent harness
+- v1 point giverny at any LLM completions api to use any model
+- v2 rust rewrite | shell RL pico model
 
 ## potential features
 
@@ -61,7 +61,7 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
     - iSH repeating spinner on each newline (column width too wide?)
 - no streaming from llama server
 - escape codes appearing inside nvim `:!` mode
-
+- terminal bench harbor benchmark
 
 
 ----
@@ -101,13 +101,11 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
 - [x] figure out nvim combination (:! and :term)
 - [x] backend becomes modular and pluginable in the future
 - [x] llama-server support
+- [x] bound scope of v0
+- [x] bound scope of v1
+- [x] bound scope of v2 rust rewrite
+- [x] hanging agent menu (really it just hangs after tool calls for some reason)
+    - [x] claude
+    - [x] v1/completions server
+- [x] split shell up into modular
 
---- 
-
-## scope 
-
-v0 use giverny as a first class cli ux for the claude code agent harness
-
-v1 point giverny at any LLM completions api to use any model
-
-v2 rust rewrite | shell RL pico model

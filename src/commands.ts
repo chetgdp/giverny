@@ -7,6 +7,7 @@ import { normalizePerms, KAOMOJI, DIM, RED, BOLD, RESET } from "./shell-utils";
 import {
     loadConfigWithSources, saveConfig, loadSession, loadUsage,
     loadSessions, saveSession, clearSession, loadApproved,
+    discoverSessions,
     GIVERNY_DIR, USAGE_FILE, TRANSCRIPT_FILE,
     type ConfigSource,
 } from "./state";
@@ -339,7 +340,9 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
         }
         case "resume":
         case "continue": {
-            const sessions = await loadSessions();
+            // Discover sessions from Claude Code's storage (~/.claude/projects/)
+            // so giverny and claude code share the same session pool
+            const { sessions, total } = await discoverSessions();
             if (!arg) {
                 if (sessions.length === 0) {
                     console.log(`${DIM}no sessions${RESET}`);
@@ -349,11 +352,19 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 for (let i = 0; i < sessions.length; i++) {
                     const s = sessions[i];
                     const ago = timeAgo(new Date(s.ts));
-                    const mark = s.active ? " (active)" : "";
+                    const mark = s.active ? ` ${BOLD}(active)${RESET}` : "";
+                    const origin = s.origin === "giverny" ? "·" : "◆";
                     const idx = `${i + 1}.`;
-                    console.log(`  ${DIM}${idx.padEnd(4)}${RESET}${s.id} ${DIM}${ago}${mark}${RESET}`);
+                    const preview = s.prompt ? `  ${s.prompt.slice(0, 60)}` : "";
+                    console.log(`  ${DIM}${idx.padEnd(4)}${RESET}${origin} ${s.id.slice(0, 8)}… ${DIM}${ago}${mark}${RESET}`);
+                    if (preview) console.log(`       ${DIM}${preview}${RESET}`);
                 }
-                console.log(`\n${DIM}/resume <number> or /resume <id>${RESET}`);
+                if (total > sessions.length) {
+                    console.log(`  ${DIM}... ${total - sessions.length} more${RESET}`);
+                }
+                console.log(`\n${DIM}· giverny  ◆ claude code${RESET}`);
+                console.log(`${DIM}${join(process.env.HOME || "~", ".claude", "projects", process.cwd().replace(/\//g, "-"))}/${RESET}`);
+                console.log(`${DIM}/resume <number> or /resume <id>${RESET}`);
                 return true;
             }
             // Resume by index or ID prefix
