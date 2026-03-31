@@ -1,10 +1,12 @@
 ## todo next
 - [] better resume (what is this?) 
     - [x] claude code and giverny interchangeable
-    - [] locally stored sessions for stateless llm apis?
-- [] general refactor
+    - [x] locally stored sessions for stateless llm apis?
+        - [] context window over large sessions?
+        - [] more ergonomic names?
 - [x] llama-server should not be called that, the feature can hit any openai api? completions api + api_key
 - [] base system prompt
+- [] general refactor
 
 ## todo goodies
 - [x] kaomojis for ...thinking... (╯°益°)╯彡┻━┻

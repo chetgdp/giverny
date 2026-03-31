@@ -13,6 +13,7 @@
 */
 
 import { log } from "./config";
+import { loadConversation, saveConversation } from "./state";
 import {
     isProcessControl,
     type Backend,
@@ -86,12 +87,20 @@ export class Bridge {
             abort: () => { aborted = true; },
         };
 
-        // Build initial message history
-        const messages: any[] = [];
-        if (opts.systemPrompt) {
-            messages.push({ role: "system", content: opts.systemPrompt });
+        // Build message history — resume from saved conversation if available
+        let messages: any[] = [];
+        let sessionId = opts.sessionId || null;
+
+        const saved = sessionId ? await loadConversation(sessionId) : null;
+        if (saved) {
+            messages = saved.messages;
+            messages.push({ role: "user", content: opts.prompt });
+        } else {
+            if (opts.systemPrompt) {
+                messages.push({ role: "system", content: opts.systemPrompt });
+            }
+            messages.push({ role: "user", content: opts.prompt });
         }
-        messages.push({ role: "user", content: opts.prompt });
 
         let finalText = "";
         const allToolUseBlocks: ToolUseBlock[] = [];
@@ -186,11 +195,22 @@ export class Bridge {
             }
         }
 
+        // Add final assistant response to history for persistence
+        if (finalText) {
+            messages.push({ role: "assistant", content: finalText });
+        }
+
+        // Generate session ID for new conversations, persist history
+        if (!sessionId) {
+            sessionId = `conv-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        }
+        await saveConversation(sessionId, messages, this.backend.info.models[0]?.id || opts.model);
+
         // Emit synthetic result event
         const durationMs = Date.now() - startTime;
         onEvent({
             type: "result",
-            sessionId: null,
+            sessionId,
             isError: false,
             result: finalText,
             numTurns,
@@ -202,7 +222,7 @@ export class Bridge {
         return {
             text: finalText,
             toolUseBlocks: allToolUseBlocks,
-            sessionId: null,
+            sessionId,
             durationMs,
             numTurns,
             usage: null,

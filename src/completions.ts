@@ -150,10 +150,12 @@ async function generate(
     try {
         while (!streamDone) {
             const readPromise = reader.read();
+            let timeoutId: Timer;
             const timeout = new Promise<{ done: true; value: undefined }>(
-                (resolve) => setTimeout(() => resolve({ done: true, value: undefined }), READ_TIMEOUT_MS),
+                (resolve) => { timeoutId = setTimeout(() => resolve({ done: true, value: undefined }), READ_TIMEOUT_MS); },
             );
             const { done, value } = await Promise.race([readPromise, timeout]);
+            clearTimeout(timeoutId!);
             if (done) break;
 
             buffer += decoder.decode(value, { stream: true });
@@ -235,8 +237,10 @@ async function checkStatus(): Promise<Record<string, string>> {
         const res = await fetch(`${baseUrl}/v1/models`);
         if (!res.ok) return { status: "error", url: baseUrl };
         const data = await res.json() as any;
-        const model = data?.data?.[0]?.id || "unknown";
-        return { status: "running", url: baseUrl, model };
+        const m = data?.data?.[0];
+        const model = m?.id || "unknown";
+        const ctx = m?.meta?.n_ctx_train || m?.max_model_len || m?.context_length || 0;
+        return { status: "running", url: baseUrl, model, context_length: ctx ? String(ctx) : "unknown" };
     } catch {
         return { status: "not running", url: baseUrl };
     }
@@ -250,7 +254,7 @@ async function probeModels(baseUrl: string): Promise<BackendInfo> {
             const data = await res.json() as any;
             const models = (data?.data || []).map((m: any) => ({
                 id: m.id || "local",
-                contextWindow: m.context_length || 0,
+                contextWindow: m.meta?.n_ctx_train || m.max_model_len || m.context_length || 0,
                 description: m.id || "completions model",
             }));
             if (models.length > 0) return { ...baseInfo, models };
@@ -268,7 +272,7 @@ const baseInfo: BackendInfo = {
     ],
     capabilities: {
         agentLoop: false,
-        sessions: false,
+        sessions: true,
         streaming: true,
     },
 };

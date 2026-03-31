@@ -39,3 +39,21 @@ Cut out abstractions, see thats the giverny philosophy in action, learn the shel
 6. Can we constrain the problem further?
 t. Mike Acton
 ```
+
+Imagine giving a human programmer the claude code json harness anytime they wanted
+to do anything in the shell. This inspired an interaction with claude about claude code after we read the leaked code:
+>"Hey I need to read a file."   
+>  
+>"Sure, fill out this JSON schema: { "tool": "Read", "file_path": string, "offset": number, "limit": number }. We'll validate it, run cat for you, truncate the output to 2000 lines, and return a structured result."  
+>
+>"I just wanted to cat the file."  
+>  
+>"Sorry, cat isn't available. But you can use the Read tool. Make sure file_path is absolute, not relative. And if the file is over 2000 lines you'll need to specify offset and limit. And you can't read directories, use Bash for that. But don't use Bash for reading files, use Read. Also don't use head or tail, use Read with offset. Oh and if you want to search inside the file don't use Read, use Grep. But don't use grep, use Grep."  
+>  
+>"Man I just want to cat src/main.ts | grep TODO."  
+>  
+>"That's two tools. You'll need to submit a Read tool call first, wait for the result, then submit a Grep tool call with the pattern. Or you could use Bash but we'd prefer you didn't."  
+>  
+>"cat src/main.ts | grep TODO"  
+>  
+>"...yeah that works too."  

@@ -240,4 +240,33 @@ export async function discoverSessions(limit = 20): Promise<{ sessions: Discover
     return { sessions, total: entries.length };
 }
 
+// Conversation persistence ------------------------------------------------ /
+// Full message history for non-agentLoop backends (completions).
+// Stored per-session in .giverny/conversations/<id>.json so the bridge
+// can replay history to stateless servers on resume.
+
+const CONVERSATIONS_DIR = join(GIVERNY_DIR, "conversations");
+
+export interface SavedConversation {
+    messages: any[];
+    ts: string;
+    model?: string;
+}
+
+export async function loadConversation(id: string): Promise<SavedConversation | null> {
+    try {
+        return JSON.parse(await Bun.file(join(CONVERSATIONS_DIR, `${id}.json`)).text());
+    } catch {
+        return null;
+    }
+}
+
+export async function saveConversation(id: string, messages: any[], model?: string) {
+    mkdirSync(CONVERSATIONS_DIR, { recursive: true });
+    await Bun.write(
+        join(CONVERSATIONS_DIR, `${id}.json`),
+        JSON.stringify({ messages, ts: new Date().toISOString(), model } satisfies SavedConversation, null, 2) + "\n",
+    );
+}
+
 export { claudeProjectDir };

@@ -51,10 +51,17 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             if (status.url) console.log(`  url:          ${status.url}`);
             if (status.subscription) console.log(`  subscription: ${status.subscription}${status.rateTier ? ` (${status.rateTier})` : ""}`);
             if (status.model) console.log(`  server model: ${status.model}`);
+            if (status.context_length) {
+                const ctx = status.context_length === "unknown" ? "unknown" : `${Number(status.context_length).toLocaleString()} tokens`;
+                console.log(`  context:      ${ctx}`);
+            }
             if (status.status) console.log(`  server:       ${status.status}`);
 
-            console.log(`  model:        ${cfg.model}${sourceTag(sources.model)}`);
-            console.log(`  effort:       ${cfg.effort}${sourceTag(sources.effort)}`);
+            // model/effort are Claude-specific — show server model instead for completions
+            if (bridge.info.name !== "completions") {
+                console.log(`  model:        ${cfg.model}${sourceTag(sources.model)}`);
+                console.log(`  effort:       ${cfg.effort}${sourceTag(sources.effort)}`);
+            }
 
             // Session state — make it clear what's available
             if (caps.sessions) {
