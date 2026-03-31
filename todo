@@ -3,7 +3,7 @@
     - [x] claude code and giverny interchangeable
     - [] locally stored sessions for stateless llm apis?
 - [] general refactor
-- [] llama-server should not be called that, the feature can hit any openai api?
+- [x] llama-server should not be called that, the feature can hit any openai api? completions api + api_key
 - [] base system prompt
 
 ## todo goodies

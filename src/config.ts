@@ -16,6 +16,7 @@ export interface ShellConfig {
     prefix?: string;
     backend?: string;
     url?: string;
+    apiKey?: string;
     model?: string;
     effort?: string;
     perms?: string;
@@ -28,6 +29,7 @@ export const CONFIG_DEFAULTS: Required<ShellConfig> = {
     prefix: "@",
     backend: "claude-code",
     url: "",
+    apiKey: "",
     model: "opus",
     effort: "high",
     perms: "ask",

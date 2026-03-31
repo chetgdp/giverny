@@ -178,7 +178,15 @@ function prompt(label: string, options: { value: string; desc: string }[], curre
         const marker = i === selected ? ">" : " ";
         const highlight = i === selected ? BOLD : DIM;
         const tag = options[i].value === hardDefault ? ` ${DIM}(default)${RESET}` : "";
-        return `  ${marker} ${i + 1}) ${highlight}${options[i].value}${RESET}  ${DIM}${options[i].desc}${RESET}${tag}`;
+        const full = `  ${marker} ${i + 1}) ${highlight}${options[i].value}${RESET}  ${DIM}${options[i].desc}${RESET}${tag}`;
+        // Truncate to terminal width to prevent line wrap (which breaks re-render)
+        const cols = process.stdout.columns || 80;
+        const visible = full.replace(/\x1b\[[0-9;]*m/g, "");
+        if (visible.length <= cols) return full;
+        // Cut the description short, keeping ANSI reset at the end
+        const overflow = visible.length - cols;
+        const descTrunc = options[i].desc.slice(0, -(overflow + 1));
+        return `  ${marker} ${i + 1}) ${highlight}${options[i].value}${RESET}  ${DIM}${descTrunc}${RESET}`;
     }
 
     function render() {
@@ -258,12 +266,13 @@ function prompt(label: string, options: { value: string; desc: string }[], curre
 
 const backend = prompt("backend", [
     { value: "claude-code", desc: "claude CLI (requires claude)" },
-    { value: "llama-server", desc: "llama.cpp server (local or remote)" },
+    { value: "completions", desc: "/v1/chat/completions API (llama.cpp, ollama, vllm, etc.)" },
 ], config.backend);
 
-// URL prompt for llama-server — freeform text input
+// URL and API key prompts for completions backend
 let url = config.url || "";
-if (backend === "llama-server") {
+let apiKey = config.apiKey || "";
+if (backend === "completions") {
     const defaultUrl = url || "http://localhost:8080";
     process.stdout.write(`\n  ${BOLD}url${RESET} ${DIM}(enter to accept)${RESET}\n`);
     process.stdout.write(`  > ${defaultUrl}`);
@@ -280,6 +289,18 @@ if (backend === "llama-server") {
         });
         // Pre-fill with default
         iface.write(defaultUrl);
+    });
+
+    // API key — optional, blank to skip
+    process.stdout.write(`\n  ${BOLD}api key${RESET} ${DIM}(enter to skip)${RESET}\n`);
+    execSync("stty sane", { stdio: "inherit" });
+    const rl2 = await import("readline");
+    const iface2 = rl2.createInterface({ input: process.stdin, output: process.stdout });
+    apiKey = await new Promise<string>((resolve) => {
+        iface2.question(`  > `, (answer: string) => {
+            iface2.close();
+            resolve(answer.trim());
+        });
     });
 }
 
@@ -328,7 +349,7 @@ const output = prompt("output", [
     { value: "verbose", desc: "full tool output" },
 ], config.output);
 
-config = { prefix, backend, url: url || undefined, model, effort, perms, output, session };
+config = { prefix, backend, url: url || undefined, apiKey: apiKey || undefined, model, effort, perms, output, session };
 
 mkdirSync(GLOBAL_DIR, { recursive: true });
 writeFileSync(GLOBAL_CONFIG, JSON.stringify(config, null, 2) + "\n");

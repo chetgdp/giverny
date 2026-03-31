@@ -37,7 +37,7 @@ export interface GenerateOptions {
     timeout?: number;
     cwd?: string;
     // Backend-specific options. Claude puts effort, perms, tools filter here.
-    // Llama-server puts temperature, top_p, tool schemas here.
+    // Completions backend puts temperature, top_p, tool schemas here.
     options?: Record<string, any>;
 }
 
@@ -159,11 +159,11 @@ export function getBackend(name: string): Backend {
             const { claudeCodeBackend } = require("./bridge");
             return claudeCodeBackend;
         }
-        case "llama-server": {
-            const { llamaBackend } = require("./llama");
-            return llamaBackend;
+        case "completions": {
+            const { completionsBackend } = require("./completions");
+            return completionsBackend;
         }
         default:
-            throw new Error(`Unknown backend: ${name}. Available: claude-code, llama-server`);
+            throw new Error(`Unknown backend: ${name}. Available: claude-code, completions`);
     }
 }

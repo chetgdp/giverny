@@ -34,6 +34,7 @@ export interface RunShellOpts {
     tools: string;
     output: string;
     url?: string;
+    apiKey?: string;
     bridge: Bridge;
 }
 
@@ -48,7 +49,7 @@ interface ShellResult {
 }
 
 export async function runShell(opts: RunShellOpts, sessionId: string | null, approvedTools: Set<string>, overridePerms?: string): Promise<ShellResult> {
-    const { prompt, model, effort, perms, tools, output, url, bridge } = opts;
+    const { prompt, model, effort, perms, tools, output, url, apiKey, bridge } = opts;
     const effectivePerms = overridePerms || perms;
     const isAskMode = effectivePerms === "ask";
     let killed = false;
@@ -191,7 +192,7 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
 
     // In ask mode, we bypass the backend's permission system (which can only
     // deny in -p mode) and handle permissions ourselves via pause/resume.
-    // Non-agentLoop backends (llama-server etc.) need a system prompt —
+    // Non-agentLoop backends (completions etc.) need a system prompt —
     // agentLoop backends (claude -p) supply their own.
     const systemPrompt = bridge.info.capabilities.agentLoop ? undefined : TOOL_SYSTEM_PROMPT;
 
@@ -206,6 +207,7 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
                 perms: isAskMode ? "auto" : effectivePerms,
                 tools,
                 url: url || undefined,
+                apiKey: apiKey || undefined,
             },
         },
         onEvent,
@@ -273,7 +275,7 @@ export async function main() {
     const perms = cfg.perms;
     const tools = cfg.tools;
     const output = cfg.output;
-    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, url: cfg.url, bridge };
+    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, url: cfg.url, apiKey: cfg.apiKey, bridge };
 
     // Session init
     const isFresh = cfg.session === "fresh";

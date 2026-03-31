@@ -19,7 +19,7 @@ switch (cmd) {
         await import("./src/setup.ts");
         break;
     case "--use": {
-        // giverny --use llama-server http://192.168.2.16:8080
+        // giverny --use completions http://192.168.2.16:8080
         // giverny --use claude-code
         const { existsSync, mkdirSync, readFileSync, writeFileSync } = await import("fs");
         const { join } = await import("path");
@@ -27,7 +27,7 @@ switch (cmd) {
         const GLOBAL_CONFIG = join(GLOBAL_DIR, "config.json");
         const backend = args[1];
         const url = args[2] || "";
-        const valid = ["claude-code", "llama-server"];
+        const valid = ["claude-code", "completions"];
         if (!backend || !valid.includes(backend)) {
             console.log(`Usage: giverny --use <${valid.join("|")}> [url]`);
             if (existsSync(GLOBAL_CONFIG)) {

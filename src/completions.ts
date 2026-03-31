@@ -1,9 +1,10 @@
-// llama.ts
+// completions.ts
 /*
-* llama-server Backend
+* Completions Backend
 *
-* Implements the Backend interface for llama.cpp's llama-server,
-* which exposes an OpenAI-compatible /v1/chat/completions endpoint.
+* Implements the Backend interface for any server exposing a
+* /v1/chat/completions endpoint (llama.cpp, ollama, vllm,
+* OpenRouter, etc.).
 *
 * This is a single-turn completion primitive. The agent loop
 * (tool call → execute → re-prompt) lives in Bridge (bridge-loop.ts).
@@ -23,7 +24,11 @@ import { TOOL_SCHEMAS } from "./tools";
 const DEFAULT_URL = "http://localhost:8080";
 
 function getBaseUrl(opts?: Record<string, any>): string {
-    return opts?.url || process.env.LLAMA_URL || DEFAULT_URL;
+    return opts?.url || process.env.COMPLETIONS_URL || DEFAULT_URL;
+}
+
+function getApiKey(opts?: Record<string, any>): string {
+    return opts?.apiKey || process.env.COMPLETIONS_API_KEY || "";
 }
 
 // Build OpenAI-format messages from GenerateOptions
@@ -83,6 +88,7 @@ async function generate(
     onEvent: (event: BridgeEvent, control: AbortControl) => void,
 ): Promise<GenerateResult> {
     const baseUrl = getBaseUrl(opts.options);
+    const apiKey = getApiKey(opts.options);
     const abortController = new AbortController();
 
     const control: AbortControl = {
@@ -107,20 +113,22 @@ async function generate(
 
     let response: Response;
     try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
         response = await fetch(`${baseUrl}/v1/chat/completions`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(body),
             signal: abortController.signal,
         });
     } catch (e: any) {
         if (e.name === "AbortError") return { ok: true };
-        return { ok: false, error: `llama-server connection failed: ${e.message}` };
+        return { ok: false, error: `completions connection failed: ${e.message}` };
     }
 
     if (!response.ok) {
         const text = await response.text().catch(() => "");
-        return { ok: false, error: `llama-server ${response.status}: ${text}` };
+        return { ok: false, error: `completions ${response.status}: ${text}` };
     }
 
     // Parse SSE stream
@@ -135,7 +143,7 @@ async function generate(
 
     let streamDone = false;
 
-    // Safety valve: if llama-server stops sending data without closing
+    // Safety valve: if server stops sending data without closing
     // the connection or sending [DONE], don't hang forever.
     const READ_TIMEOUT_MS = 30_000;
 
@@ -189,7 +197,7 @@ async function generate(
         }
     } catch (e: any) {
         if (e.name === "AbortError") return { ok: true };
-        return { ok: false, error: `llama-server stream error: ${e.message}` };
+        return { ok: false, error: `completions stream error: ${e.message}` };
     } finally {
         reader.releaseLock();
     }
@@ -220,9 +228,9 @@ async function generate(
     return { ok: true };
 }
 
-// Status check — verify llama-server is running
+// Status check — verify server is running
 async function checkStatus(): Promise<Record<string, string>> {
-    const baseUrl = process.env.LLAMA_URL || DEFAULT_URL;
+    const baseUrl = process.env.COMPLETIONS_URL || DEFAULT_URL;
     try {
         const res = await fetch(`${baseUrl}/v1/models`);
         if (!res.ok) return { status: "error", url: baseUrl };
@@ -234,7 +242,7 @@ async function checkStatus(): Promise<Record<string, string>> {
     }
 }
 
-// Probe llama-server for model info — called once on first use
+// Probe server for model info — called once on first use
 async function probeModels(baseUrl: string): Promise<BackendInfo> {
     try {
         const res = await fetch(`${baseUrl}/v1/models`);
@@ -243,7 +251,7 @@ async function probeModels(baseUrl: string): Promise<BackendInfo> {
             const models = (data?.data || []).map((m: any) => ({
                 id: m.id || "local",
                 contextWindow: m.context_length || 0,
-                description: m.id || "llama-server model",
+                description: m.id || "completions model",
             }));
             if (models.length > 0) return { ...baseInfo, models };
         }
@@ -254,9 +262,9 @@ async function probeModels(baseUrl: string): Promise<BackendInfo> {
 // Backend export
 
 const baseInfo: BackendInfo = {
-    name: "llama-server",
+    name: "completions",
     models: [
-        { id: "local", contextWindow: 0, description: "llama-server model" },
+        { id: "local", contextWindow: 0, description: "completions model" },
     ],
     capabilities: {
         agentLoop: false,
@@ -267,12 +275,12 @@ const baseInfo: BackendInfo = {
 
 let cachedInfo: BackendInfo | null = null;
 
-export const llamaBackend: Backend = {
+export const completionsBackend: Backend = {
     get info(): BackendInfo {
         if (!cachedInfo) {
             // Kick off probe but return base info synchronously.
             // Next access will have the real info.
-            const baseUrl = process.env.LLAMA_URL || DEFAULT_URL;
+            const baseUrl = process.env.COMPLETIONS_URL || DEFAULT_URL;
             probeModels(baseUrl).then(i => { cachedInfo = i; });
             return baseInfo;
         }

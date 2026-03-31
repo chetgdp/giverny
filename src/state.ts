@@ -137,10 +137,10 @@ export async function saveApproved(tools: Set<string>) {
 const HOME = process.env.HOME || "~";
 const CLAUDE_PROJECTS_DIR = join(HOME, ".claude", "projects");
 
-// Claude Code encodes cwd by replacing / with -
-// /home/user/code/project → -home-user-code-project
+// Claude Code encodes cwd by replacing /, _, and . with -
+// /home/user/my_project.v2 → -home-user-my-project-v2
 function claudeProjectDir(): string {
-    const encoded = process.cwd().replace(/\//g, "-");
+    const encoded = process.cwd().replace(/[\/_.]/g, "-");
     return join(CLAUDE_PROJECTS_DIR, encoded);
 }
 
@@ -215,7 +215,7 @@ export async function discoverSessions(limit = 20): Promise<{ sessions: Discover
                 mtime: statSync(join(projectDir, f)).mtimeMs,
             }));
     } catch {
-        return [];
+        return { sessions: [], total: 0 };
     }
 
     // Sort by mtime descending — most recent first, no JSONL reads needed

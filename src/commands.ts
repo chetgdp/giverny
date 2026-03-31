@@ -363,7 +363,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     console.log(`  ${DIM}... ${total - sessions.length} more${RESET}`);
                 }
                 console.log(`\n${DIM}· giverny  ◆ claude code${RESET}`);
-                console.log(`${DIM}${join(process.env.HOME || "~", ".claude", "projects", process.cwd().replace(/\//g, "-"))}/${RESET}`);
+                console.log(`${DIM}${join(process.env.HOME || "~", ".claude", "projects", process.cwd().replace(/[\/_.]/g, "-"))}/${RESET}`);
                 console.log(`${DIM}/resume <number> or /resume <id>${RESET}`);
                 return true;
             }
