@@ -2,6 +2,7 @@
 - [] better resume (what is this?) 
     - [x] claude code and giverny interchangeable
     - [x] locally stored sessions for stateless llm apis?
+    k 
         - [] context window over large sessions?
         - [] more ergonomic names?
 - [x] llama-server should not be called that, the feature can hit any openai api? completions api + api_key
