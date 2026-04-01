@@ -266,7 +266,7 @@ export async function main() {
 
     // Load config and backend
     const cfg = await loadConfig();
-    const bridge = new Bridge(getBackend(cfg.backend || "claude-code"));
+    const bridge = new Bridge(getBackend(cfg.backend || "claude-code", { protocol: cfg.protocol }));
 
     // Slash command dispatch
     if (prompt.startsWith("/")) {

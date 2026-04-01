@@ -17,6 +17,7 @@ export interface BackendConfig {
     apiKey?: string;
     clusterId?: string;
     port?: string;
+    protocol?: string;  // "completions" or "responses"
 }
 
 // Shell config: the single source of truth for defaults
@@ -34,6 +35,7 @@ export interface ShellConfig {
     apiKey?: string;
     clusterId?: string;
     port?: string;
+    protocol?: string;
     // Per-backend storage
     backends?: Record<string, BackendConfig>;
 }

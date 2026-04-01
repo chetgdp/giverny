@@ -7,7 +7,7 @@ import { normalizePerms, KAOMOJI, DIM, RED, BOLD, RESET } from "./shell-utils";
 import {
     loadConfigWithSources, saveConfig, loadSession, loadUsage,
     loadSessions, saveSession, clearSession, loadApproved,
-    discoverSessions,
+    discoverSessions, discoverConversations,
     GIVERNY_DIR, USAGE_FILE, TRANSCRIPT_FILE,
     type ConfigSource,
 } from "./state";
@@ -349,9 +349,12 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
         }
         case "resume":
         case "continue": {
-            // Discover sessions from Claude Code's storage (~/.claude/projects/)
-            // so giverny and claude code share the same session pool
-            const { sessions, total } = await discoverSessions();
+            // Backend-aware session discovery
+            const isClaude = bridge.info.name === "claude-code";
+            const { sessions, total } = isClaude
+                ? await discoverSessions()
+                : await discoverConversations();
+
             if (!arg) {
                 if (sessions.length === 0) {
                     console.log(`${DIM}no sessions${RESET}`);
@@ -362,17 +365,20 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     const s = sessions[i];
                     const ago = timeAgo(new Date(s.ts));
                     const mark = s.active ? ` ${BOLD}(active)${RESET}` : "";
-                    const origin = s.origin === "giverny" ? "·" : "◆";
                     const idx = `${i + 1}.`;
                     const preview = s.prompt ? `  ${s.prompt.slice(0, 60)}` : "";
-                    console.log(`  ${DIM}${idx.padEnd(4)}${RESET}${origin} ${s.id.slice(0, 8)}… ${DIM}${ago}${mark}${RESET}`);
+                    const model = !isClaude && s.slug ? ` ${DIM}(${s.slug})${RESET}` : "";
+                    console.log(`  ${DIM}${idx.padEnd(4)}${RESET}${s.id.slice(0, 8)}… ${DIM}${ago}${mark}${RESET}${model}`);
                     if (preview) console.log(`       ${DIM}${preview}${RESET}`);
                 }
                 if (total > sessions.length) {
                     console.log(`  ${DIM}... ${total - sessions.length} more${RESET}`);
                 }
-                console.log(`\n${DIM}· giverny  ◆ claude code${RESET}`);
-                console.log(`${DIM}${join(process.env.HOME || "~", ".claude", "projects", process.cwd().replace(/[\/_.]/g, "-"))}/${RESET}`);
+                if (isClaude) {
+                    console.log(`\n${DIM}${join(process.env.HOME || "~", ".claude", "projects", process.cwd().replace(/[\/_.]/g, "-"))}/${RESET}`);
+                } else {
+                    console.log(`\n${DIM}.giverny/conversations/${RESET}`);
+                }
                 console.log(`${DIM}/resume <number> or /resume <id>${RESET}`);
                 return true;
             }

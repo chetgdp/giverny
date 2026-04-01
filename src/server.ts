@@ -21,8 +21,14 @@ import {
     convertToolUseBlocks,
     makeOpenAIResponse,
     buildSSEStream,
+    randomId,
     type ParsedResponse,
 } from "./protocol";
+import {
+    normalizeInput,
+    makeResponseObject,
+    buildResponsesSSEStream,
+} from "./responses-protocol";
 
 // let's pick a better port?
 // make it easy to config?
@@ -38,6 +44,7 @@ interface Session {
 }
 
 const sessions = new Map<string, Session>();
+const responseSessions = new Map<string, Session>();
 
 // Request handler --------------------------------------------------------- /
 
@@ -164,6 +171,118 @@ async function handleChatCompletions(body: any): Promise<Response> {
     return Response.json(makeOpenAIResponse(parsed, model, result.usage));
 }
 
+// Responses handler ------------------------------------------------------- /
+
+async function handleResponses(body: any): Promise<Response> {
+    const { input, instructions, tools, model, stream, previous_response_id } = body;
+
+    if (!input) {
+        return Response.json(
+            { error: { message: "input is required", type: "invalid_request_error" } },
+            { status: 400 },
+        );
+    }
+
+    // Normalize to messages format for existing prompt builders
+    const messages = normalizeInput(input, instructions);
+    const nonSystem = messages.filter((m: any) => m.role !== "system");
+
+    let prompt: string;
+    let resumeSessionId: string | undefined;
+    let isResume = false;
+
+    if (previous_response_id) {
+        const session = responseSessions.get(previous_response_id);
+        if (session) {
+            prompt = buildPrompt(messages);
+            resumeSessionId = session.backendSessionId;
+            isResume = true;
+        } else {
+            prompt = buildPrompt(messages);
+        }
+    } else {
+        prompt = buildPrompt(messages);
+    }
+
+    const systemPrompt = buildSystemPrompt(messages, tools);
+    const toolCount = tools?.length || 0;
+
+    let sessionTag = " [NEW SESSION]";
+    if (isResume) sessionTag = ` [RESUME ${resumeSessionId!.slice(0, 8)}…]`;
+    log(`→ claude -p | responses, ${toolCount} tools, model=${model || "default"}, stream=${!!stream}${sessionTag}`);
+
+    const start = Date.now();
+
+    let result;
+    try {
+        result = await bridge.collect({
+            prompt,
+            systemPrompt,
+            model,
+            sessionId: resumeSessionId,
+            options: { tools: "" },
+        });
+    } catch (e: any) {
+        if (isResume) {
+            log(`⚠ Resume failed, falling back to new session`);
+            responseSessions.delete(previous_response_id!);
+            result = await bridge.collect({
+                prompt: buildPrompt(messages),
+                systemPrompt,
+                model,
+                options: { tools: "" },
+            });
+        } else {
+            throw e;
+        }
+    }
+
+    const elapsed = Date.now() - start;
+
+    // Parse tool calls — same logic as chat/completions
+    let parsed: ParsedResponse;
+
+    if (result.toolUseBlocks.length > 0) {
+        parsed = {
+            content: result.text || null,
+            tool_calls: convertToolUseBlocks(result.toolUseBlocks),
+            finish_reason: "tool_calls",
+        };
+    } else {
+        parsed = parseTextToolCalls(result.text);
+    }
+
+    const responseId = randomId("resp_", 8);
+
+    // Store session for future previous_response_id lookups (text-only responses)
+    if (result.sessionId && result.toolUseBlocks.length === 0) {
+        responseSessions.set(responseId, {
+            backendSessionId: result.sessionId,
+            sentMsgCount: nonSystem.length,
+        });
+    }
+
+    const textLen = parsed.content?.length || 0;
+    const toolLen = parsed.tool_calls?.length || 0;
+    const source = result.toolUseBlocks.length > 0 ? "structured" : "text";
+    let msg = `← ${elapsed}ms | ${textLen} chars text, ${toolLen} tool calls (${source}) [${responseId.slice(0, 12)}…]`;
+    if (result.durationMs) msg += ` (api: ${result.durationMs}ms)`;
+    log(msg);
+
+    if (stream) {
+        return new Response(buildResponsesSSEStream(parsed, model, result.usage, responseId), {
+            headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+            },
+        });
+    }
+
+    return Response.json(makeResponseObject(parsed, model, result.usage, responseId));
+}
+
 // HTTP server ------------------------------------------------------------- /
 
 export const server = Bun.serve({
@@ -205,13 +324,27 @@ export const server = Bun.serve({
             }
         }
 
+        if (req.method === "POST" && url.pathname === "/v1/responses") {
+            try {
+                const body = await req.json();
+                log(`↓ incoming responses request (model=${body.model || "default"}, stream=${!!body.stream})`);
+                return await handleResponses(body);
+            } catch (err: any) {
+                log(`error:`, err.message);
+                return Response.json(
+                    { error: { message: err.message, type: "server_error", code: 500 } },
+                    { status: 500 },
+                );
+            }
+        }
+
         if (req.method === "GET" && url.pathname === "/") {
             return Response.json({
                 name: "giverny",
                 version: "0.1.0",
                 status: "ok",
                 activeSessions: sessions.size,
-                endpoints: ["/v1/chat/completions", "/v1/models"],
+                endpoints: ["/v1/chat/completions", "/v1/responses", "/v1/models"],
             });
         }
 

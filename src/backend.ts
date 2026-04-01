@@ -153,18 +153,26 @@ export interface Backend {
 
 // Backend registry --------------------------------------------------------- /
 
-export function getBackend(name: string): Backend {
+export function getBackend(name: string, opts?: { protocol?: string }): Backend {
     switch (name) {
         case "claude-code": {
             const { claudeCodeBackend } = require("./bridge");
             return claudeCodeBackend;
         }
+        case "responses": {
+            const { responsesBackend } = require("./responses");
+            return responsesBackend;
+        }
         case "completions":
         case "actual.inc": {
+            if (opts?.protocol === "responses") {
+                const { responsesBackend } = require("./responses");
+                return responsesBackend;
+            }
             const { completionsBackend } = require("./completions");
             return completionsBackend;
         }
         default:
-            throw new Error(`Unknown backend: ${name}. Available: claude-code, completions, actual.inc`);
+            throw new Error(`Unknown backend: ${name}. Available: claude-code, completions, actual.inc, responses`);
     }
 }

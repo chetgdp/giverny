@@ -23,6 +23,7 @@ describe("GET /", () => {
         expect(body.name).toBe("giverny");
         expect(body.status).toBe("ok");
         expect(body.endpoints).toContain("/v1/chat/completions");
+        expect(body.endpoints).toContain("/v1/responses");
         expect(body.endpoints).toContain("/v1/models");
     });
 });
@@ -94,6 +95,30 @@ describe("POST /v1/chat/completions validation", () => {
 
     it("returns 500 for invalid JSON body", async () => {
         const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "not json",
+        });
+        expect(res.status).toBe(500);
+        const body = await res.json();
+        expect(body.error.type).toBe("server_error");
+    });
+});
+
+describe("POST /v1/responses validation", () => {
+    it("returns 400 for missing input", async () => {
+        const res = await fetch(`${baseUrl}/v1/responses`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+        });
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error.message).toBe("input is required");
+    });
+
+    it("returns 500 for invalid JSON body", async () => {
+        const res = await fetch(`${baseUrl}/v1/responses`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: "not json",

@@ -1,14 +1,7 @@
 ## todo next
-- [] better resume (what is this?) 
-    - [x] claude code and giverny interchangeable
-    - [x] locally stored sessions for stateless llm apis?
-        - [] context window over large sessions?
-        - [] more ergonomic names?
-- [x] llama-server should not be called that, the feature can hit any openai api? completions api + api_key
-- [x] actual inc distributed inference backend
-- [] fix base system prompt
-- [x] split config into backend sub parts, actual, generic completions
-- [] v1/responses support
+- [x] v1/responses support
+- [] fix base system prompt, no prompt and set prompt and shell agent mode
+- [] pick config for giverny -s other than claude code?
 - [] general refactor
 
 ## todo goodies
@@ -67,6 +60,7 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
 - no streaming from llama server
 - escape codes appearing inside nvim `:!` mode
 - terminal bench harbor benchmark
+- [] context window over large sessions?
 
 
 ----
@@ -113,4 +107,10 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
     - [x] claude
     - [x] v1/completions server
 - [x] split shell up into modular
-
+- [x] better resume (what is this?) 
+    - [x] claude code and giverny interchangeable
+    - [x] locally stored sessions for stateless llm apis?
+        - [x] backend aware resume
+- [x] llama-server should not be called that, the feature can hit any openai api? completions api + api_key
+- [x] actual inc distributed inference backend
+- [x] split config into backend sub parts, actual, generic completions

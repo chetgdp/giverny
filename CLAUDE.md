@@ -69,6 +69,10 @@ bun test:integration       # HTTP integration (server on port 18741)
 
 Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without side effects. Integration tests start a real server.
 
+## Plans
+
+Implementation plans go in `./plans/`. Completed plans move to `./plans/done/`.
+
 ## TODO
 
 See `./todo`.

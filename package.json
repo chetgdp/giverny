@@ -8,7 +8,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test",
-    "test:unit": "bun test tests/config.test.ts tests/bridge.test.ts tests/protocol.test.ts tests/shell-utils.test.ts",
+    "test:unit": "bun test tests/config.test.ts tests/bridge.test.ts tests/protocol.test.ts tests/responses-protocol.test.ts tests/responses.test.ts tests/shell-utils.test.ts",
     "test:integration": "bun test tests/server.test.ts"
   }
 }

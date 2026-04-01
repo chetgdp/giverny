@@ -40,6 +40,7 @@ function resolveBackendConfig(cfg: ShellConfig): ShellConfig {
         apiKey: bc.apiKey ?? cfg.apiKey,
         clusterId: bc.clusterId ?? cfg.clusterId,
         port: bc.port ?? cfg.port,
+        protocol: bc.protocol ?? cfg.protocol,
     };
 }
 
@@ -283,6 +284,44 @@ export async function saveConversation(id: string, messages: any[], model?: stri
         join(CONVERSATIONS_DIR, `${id}.json`),
         JSON.stringify({ messages, ts: new Date().toISOString(), model } satisfies SavedConversation, null, 2) + "\n",
     );
+}
+
+// Discover giverny conversations from .giverny/conversations/
+// Used by /resume when on completions/actual.inc backend.
+export async function discoverConversations(limit = 20): Promise<{ sessions: DiscoveredSession[]; total: number }> {
+    const activeId = await loadSession();
+
+    let entries: { id: string; mtime: number }[];
+    try {
+        entries = readdirSync(CONVERSATIONS_DIR)
+            .filter(f => f.endsWith(".json"))
+            .map(f => ({
+                id: f.replace(".json", ""),
+                mtime: statSync(join(CONVERSATIONS_DIR, f)).mtimeMs,
+            }));
+    } catch {
+        return { sessions: [], total: 0 };
+    }
+
+    entries.sort((a, b) => b.mtime - a.mtime);
+
+    const top = entries.slice(0, limit);
+    const sessions = await Promise.all(
+        top.map(async (entry): Promise<DiscoveredSession> => {
+            const conv = await loadConversation(entry.id);
+            const firstUser = conv?.messages.find((m: any) => m.role === "user");
+            return {
+                id: entry.id,
+                ts: conv?.ts || new Date(entry.mtime).toISOString(),
+                active: entry.id === activeId,
+                prompt: firstUser?.content?.slice(0, 80) || undefined,
+                slug: conv?.model || undefined,
+                origin: "giverny",
+            };
+        })
+    );
+
+    return { sessions, total: entries.length };
 }
 
 export { claudeProjectDir };

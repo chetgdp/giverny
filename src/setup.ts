@@ -266,14 +266,16 @@ function prompt(label: string, options: { value: string; desc: string }[], curre
 
 const backend = prompt("backend", [
     { value: "claude-code", desc: "claude CLI (requires claude -p)" },
+    { value: "completions", desc: "/v1/chat/completions (llama.cpp, ollama, vllm, etc.)" },
+    { value: "responses", desc: "/v1/responses streaming (OpenAI, OpenRouter, etc.)" },
     { value: "actual.inc", desc: "Actual Computer Distributed Inference Network" },
-    { value: "completions", desc: "/v1/chat/completions API (llama.cpp, ollama, vllm, etc.)" },
 ], config.backend);
 
 // Read backend-specific settings from sub-objects (fall back to legacy flat fields)
 const backends = config.backends || {};
 const actualCfg = backends["actual.inc"] || {};
 const compCfg = backends["completions"] || {};
+const respCfg = backends["responses"] || {};
 
 let url = "";
 let apiKey = "";
@@ -282,6 +284,14 @@ let port = "";
 let model = config.model || DEFAULTS.model;
 
 if (backend === "actual.inc") {
+    // Protocol choice — completions or responses
+    const currentProtocol = actualCfg.protocol || "completions";
+    const actualProtocol = prompt("protocol", [
+        { value: "completions", desc: "/v1/chat/completions" },
+        { value: "responses", desc: "/v1/responses streaming" },
+    ], currentProtocol);
+    (actualCfg as any)._protocol = actualProtocol;
+
     url = "https://api.actual.inc";
     apiKey = actualCfg.apiKey || config.apiKey || "";
     clusterId = actualCfg.clusterId || config.clusterId || "";
@@ -395,6 +405,7 @@ if (backend === "actual.inc") {
         warn("could not fetch models — you can set the model later");
         model = "auto";
     }
+
 } else if (backend === "completions") {
     url = compCfg.url || config.url || "";
     apiKey = compCfg.apiKey || config.apiKey || "";
@@ -430,6 +441,39 @@ if (backend === "actual.inc") {
         });
     });
     if (compKeyInput) apiKey = compKeyInput;
+} else if (backend === "responses") {
+    url = respCfg.url || config.url || "";
+    apiKey = respCfg.apiKey || config.apiKey || "";
+    const defaultUrl = url || "http://localhost:8080";
+    process.stdout.write(`\n  ${BOLD}url${RESET} ${DIM}(enter to accept)${RESET}\n`);
+    process.stdout.write(`  > ${defaultUrl}`);
+    execSync("stty sane", { stdio: "inherit" });
+
+    const rl = await import("readline");
+    const iface = rl.createInterface({ input: process.stdin, output: process.stdout });
+    url = await new Promise<string>((resolve) => {
+        process.stdout.write(`\r\x1b[2K`);
+        iface.question(`  > `, (answer: string) => {
+            iface.close();
+            resolve(answer.trim() || defaultUrl);
+        });
+        iface.write(defaultUrl);
+    });
+
+    // API key — optional (keep existing if saved)
+    const hasRespKey = !!apiKey;
+    const respKeyHint = hasRespKey ? "(saved, enter to keep)" : "(enter to skip)";
+    process.stdout.write(`\n  ${BOLD}api key${RESET} ${DIM}${respKeyHint}${RESET}\n`);
+    execSync("stty sane", { stdio: "inherit" });
+    const rl2 = await import("readline");
+    const iface2 = rl2.createInterface({ input: process.stdin, output: process.stdout });
+    const respKeyInput = await new Promise<string>((resolve) => {
+        iface2.question(`  > `, (answer: string) => {
+            iface2.close();
+            resolve(answer.trim());
+        });
+    });
+    if (respKeyInput) apiKey = respKeyInput;
 }
 
 const prefix = prompt("prefix", [
@@ -484,9 +528,11 @@ const output = prompt("output", [
 // Merge backend-specific fields into sub-objects, preserving other backends' settings
 const updatedBackends = { ...backends };
 if (backend === "actual.inc") {
-    updatedBackends["actual.inc"] = { url, apiKey, clusterId, port: port || undefined };
+    updatedBackends["actual.inc"] = { url, apiKey, clusterId, port: port || undefined, protocol: (actualCfg as any)._protocol || "completions" };
 } else if (backend === "completions") {
     updatedBackends["completions"] = { url, apiKey: apiKey || undefined };
+} else if (backend === "responses") {
+    updatedBackends["responses"] = { url, apiKey: apiKey || undefined };
 }
 
 config = { prefix, backend, model, effort, perms, output, session, backends: updatedBackends };

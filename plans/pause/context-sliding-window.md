@@ -23,7 +23,7 @@ messages = conversation turns only (user/assistant/tool)
 fullMessages = [system prompt] + messages  (built just before generate())
 ```
 
-- On resume: load saved messages (no system prompt), append new user message
+- On resume: load saved messages, **filter out any leading `role: "system"` message** (backwards compat with existing saved conversations that already have one baked in), then append new user message
 - On fresh: just the user message (no system prompt in array)
 - Before generate(): prepend system prompt to build `fullMessages`, pass as `_messages`
 - Before save: save `messages` (no system prompt)
@@ -36,12 +36,12 @@ budget = contextWindow - systemPromptTokens - (contextWindow * 0.15)
 ```
 - 15% headroom for the model's response
 - System prompt always kept, never trimmed
-- contextWindow from `this.backend.info.models[0].contextWindow`
-- If contextWindow is 0 (unknown), skip trimming
+- contextWindow lookup: `this.backend.info.models.find(m => m.id === opts.model)?.contextWindow` with `models[0]` fallback (same pattern as `commands.ts:118`)
+- If contextWindow is 0 (unknown / probe hasn't returned yet), skip trimming
 
 **Token estimation:**
 - ~4 chars per token (standard rough heuristic, no library needed)
-- Count `msg.content` + `JSON.stringify(msg.tool_calls)` if present
+- `JSON.stringify(msg)` for each message — covers content, tool_calls structure, role, everything in one shot
 
 **Trim strategy:**
 - Drop messages from the front (oldest first)
@@ -50,7 +50,7 @@ budget = contextWindow - systemPromptTokens - (contextWindow * 0.15)
 ### 3. Updated flow in `runWithToolLoop()`
 
 ```
-1. Load saved messages (no system prompt)
+1. Load saved messages (filter out leading system message for backwards compat)
 2. Append new user message
 3. If contextWindow known: trim messages to fit budget
 4. Build fullMessages = [systemPrompt, ...messages]
@@ -62,6 +62,10 @@ budget = contextWindow - systemPromptTokens - (contextWindow * 0.15)
 ### 4. Trim also applies inside the tool loop
 
 Each iteration adds assistant + tool results to `messages`. Before calling `generate()` on subsequent iterations, re-trim. This handles long multi-tool conversations within a single run.
+
+### 5. Note on `completions.ts` buildMessages()
+
+`buildMessages()` (line 51-58) also prepends system prompt independently. After this change it becomes dead code for multi-turn since bridge always passes `_messages` with system prompt already included. No action needed — it remains the fallback for hypothetical direct single-turn calls.
 
 ## Verification
 
