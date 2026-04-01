@@ -21,6 +21,18 @@ import type {
 } from "./backend";
 import { TOOL_SCHEMAS } from "./tools";
 
+// Extract shell commands from fenced code blocks (```bash / ```sh / ```)
+function extractCodeBlocks(text: string): string[] {
+    const re = /```(?:bash|sh|shell)\n([\s\S]*?)```/g;
+    const commands: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+        const cmd = m[1].trim();
+        if (cmd) commands.push(cmd);
+    }
+    return commands;
+}
+
 const DEFAULT_URL = "http://localhost:8080";
 
 function getBaseUrl(opts?: Record<string, any>): string {
@@ -29,6 +41,10 @@ function getBaseUrl(opts?: Record<string, any>): string {
 
 function getApiKey(opts?: Record<string, any>): string {
     return opts?.apiKey || process.env.COMPLETIONS_API_KEY || "";
+}
+
+function getClusterId(opts?: Record<string, any>): string {
+    return opts?.clusterId || process.env.COMPLETIONS_CLUSTER_ID || "";
 }
 
 // Build OpenAI-format messages from GenerateOptions
@@ -89,6 +105,7 @@ async function generate(
 ): Promise<GenerateResult> {
     const baseUrl = getBaseUrl(opts.options);
     const apiKey = getApiKey(opts.options);
+    const clusterId = getClusterId(opts.options);
     const abortController = new AbortController();
 
     const control: AbortControl = {
@@ -115,6 +132,7 @@ async function generate(
     try {
         const headers: Record<string, string> = { "Content-Type": "application/json" };
         if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+        if (clusterId) headers["X-Cluster-ID"] = clusterId;
         response = await fetch(`${baseUrl}/v1/chat/completions`, {
             method: "POST",
             headers,
@@ -207,19 +225,46 @@ async function generate(
     // Build blocks from accumulated content
     const blocks: ContentBlock[] = [];
 
-    if (fullText) {
-        blocks.push({ type: "text", text: fullText });
-    }
+    // Fallback: if model didn't use function calling but wrote code blocks,
+    // extract them as exec tool calls. Many local models do this.
+    if (fullText && toolCallAccum.size === 0) {
+        const codeBlocks = extractCodeBlocks(fullText);
+        if (codeBlocks.length > 0) {
+            // Strip code blocks from the text to get surrounding prose
+            let prose = fullText;
+            for (const cmd of codeBlocks) {
+                // Remove the fenced block that contained this command
+                prose = prose.replace(/```(?:bash|sh|shell)?\n[^`]*```/s, "");
+            }
+            prose = prose.trim();
+            if (prose) blocks.push({ type: "text", text: prose });
 
-    for (const [, tc] of toolCallAccum) {
-        let input: Record<string, any> = {};
-        try { input = JSON.parse(tc.arguments); } catch {}
-        blocks.push({
-            type: "tool_use",
-            id: tc.id,
-            name: tc.name,
-            input,
-        });
+            for (let i = 0; i < codeBlocks.length; i++) {
+                blocks.push({
+                    type: "tool_use",
+                    id: `call_fb_${Date.now()}_${i}`,
+                    name: "exec",
+                    input: { command: codeBlocks[i] },
+                });
+            }
+        } else {
+            blocks.push({ type: "text", text: fullText });
+        }
+    } else {
+        if (fullText) {
+            blocks.push({ type: "text", text: fullText });
+        }
+
+        for (const [, tc] of toolCallAccum) {
+            let input: Record<string, any> = {};
+            try { input = JSON.parse(tc.arguments); } catch {}
+            blocks.push({
+                type: "tool_use",
+                id: tc.id,
+                name: tc.name,
+                input,
+            });
+        }
     }
 
     // Emit assistant event with all blocks
@@ -231,10 +276,15 @@ async function generate(
 }
 
 // Status check — verify server is running
-async function checkStatus(): Promise<Record<string, string>> {
-    const baseUrl = process.env.COMPLETIONS_URL || DEFAULT_URL;
+async function checkStatus(opts?: Record<string, any>): Promise<Record<string, string>> {
+    const baseUrl = getBaseUrl(opts);
+    const apiKey = getApiKey(opts);
+    const clusterId = getClusterId(opts);
     try {
-        const res = await fetch(`${baseUrl}/v1/models`);
+        const headers: Record<string, string> = {};
+        if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+        if (clusterId) headers["X-Cluster-ID"] = clusterId;
+        const res = await fetch(`${baseUrl}/v1/models`, { headers });
         if (!res.ok) return { status: "error", url: baseUrl };
         const data = await res.json() as any;
         const m = data?.data?.[0];

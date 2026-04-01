@@ -11,25 +11,36 @@ export const TAG = "giverny";
 export const VALID_PREFIXES = [",", "?", "@", "+", "_"] as const;
 export type PrefixChar = typeof VALID_PREFIXES[number];
 
+// Per-backend connection settings (nested under backend name in config JSON)
+export interface BackendConfig {
+    url?: string;
+    apiKey?: string;
+    clusterId?: string;
+    port?: string;
+}
+
 // Shell config: the single source of truth for defaults
 export interface ShellConfig {
     prefix?: string;
     backend?: string;
-    url?: string;
-    apiKey?: string;
     model?: string;
     effort?: string;
     perms?: string;
     tools?: string;
     output?: string;
     session?: string;
+    // Backend-specific (resolved at load time from sub-objects)
+    url?: string;
+    apiKey?: string;
+    clusterId?: string;
+    port?: string;
+    // Per-backend storage
+    backends?: Record<string, BackendConfig>;
 }
 
-export const CONFIG_DEFAULTS: Required<ShellConfig> = {
+export const CONFIG_DEFAULTS: Required<Omit<ShellConfig, "backends" | "url" | "apiKey" | "clusterId" | "port">> = {
     prefix: "@",
     backend: "claude-code",
-    url: "",
-    apiKey: "",
     model: "opus",
     effort: "high",
     perms: "ask",

@@ -159,11 +159,12 @@ export function getBackend(name: string): Backend {
             const { claudeCodeBackend } = require("./bridge");
             return claudeCodeBackend;
         }
-        case "completions": {
+        case "completions":
+        case "actual.inc": {
             const { completionsBackend } = require("./completions");
             return completionsBackend;
         }
         default:
-            throw new Error(`Unknown backend: ${name}. Available: claude-code, completions`);
+            throw new Error(`Unknown backend: ${name}. Available: claude-code, completions, actual.inc`);
     }
 }

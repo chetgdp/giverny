@@ -216,13 +216,15 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
         case "max":
             return handleSlashCommand(`/effort ${name}`, bridge);
         case "ask":
+        case "confirm":
         case "auto":
         case "plan":
             return handleSlashCommand(`/perms ${name}`, bridge);
         case "perms": {
             if (!arg) {
                 console.log(`perms: ${cfg.perms}${sourceTag(sources.perms)}`);
-                console.log(`  ask      prompt before tool use`);
+                console.log(`  ask      prompt before dangerous tools`);
+                console.log(`  confirm  prompt before every tool call`);
                 console.log(`  auto     skip all permission prompts`);
                 console.log(`  plan     read-only, no writes or execution`);
                 console.log(`  /perms <mode> [--local]${RESET}`);

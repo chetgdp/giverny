@@ -33,7 +33,7 @@ export function printHelp(prefix = ",") {
     console.log("  /effort <level>           Set effort level");
     console.log("  /low /medium /high /max");
     console.log("  /perms <mode>             Show or set permissions mode");
-    console.log("  /ask /auto /plan");
+    console.log("  /ask /confirm /auto /plan");
     console.log("  /output <mode>            Set tool output mode");
     console.log("  /quiet /normal /verbose");
     console.log("  /session <mode>           Set session mode");

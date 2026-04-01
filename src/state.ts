@@ -28,16 +28,32 @@ type ConfigKey = keyof ShellConfig;
 export type ConfigSource = "default" | "global" | "local";
 export type ConfigWithSources = { config: ShellConfig; sources: Record<ConfigKey, ConfigSource> };
 
+// Resolve backend-specific fields (url, apiKey, etc.) from the nested
+// backends sub-object into flat fields for consumers.
+function resolveBackendConfig(cfg: ShellConfig): ShellConfig {
+    const backend = cfg.backend || CONFIG_DEFAULTS.backend;
+    const bc = cfg.backends?.[backend];
+    if (!bc) return cfg;
+    return {
+        ...cfg,
+        url: bc.url ?? cfg.url,
+        apiKey: bc.apiKey ?? cfg.apiKey,
+        clusterId: bc.clusterId ?? cfg.clusterId,
+        port: bc.port ?? cfg.port,
+    };
+}
+
 export const loadConfig = async (): Promise<ShellConfig> => {
     const global = await loadJSON<ShellConfig>(GLOBAL_CONFIG_FILE, {});
     const local = await loadJSON<ShellConfig>(CONFIG_FILE, {});
-    return { ...global, ...local };
+    return resolveBackendConfig({ ...global, ...local });
 };
 
 export const loadConfigWithSources = async (): Promise<ConfigWithSources> => {
     const global = await loadJSON<ShellConfig>(GLOBAL_CONFIG_FILE, {});
     const local = await loadJSON<ShellConfig>(CONFIG_FILE, {});
-    const config = { ...CONFIG_DEFAULTS, ...global, ...local };
+    const merged = resolveBackendConfig({ ...global, ...local });
+    const config = { ...CONFIG_DEFAULTS, ...merged };
     const sources: Record<ConfigKey, ConfigSource> = {} as any;
     for (const key of Object.keys(CONFIG_DEFAULTS) as ConfigKey[]) {
         if (local[key] !== undefined) sources[key] = "local";

@@ -109,7 +109,7 @@ const GLOBAL_DIR = join(HOME, ".giverny");
 const GLOBAL_CONFIG = join(GLOBAL_DIR, "config.json");
 
 // Defaults from the single source of truth in config.ts
-const DEFAULTS = CONFIG_DEFAULTS as Record<string, string>;
+const DEFAULTS = CONFIG_DEFAULTS as Record<string, any>;
 
 let config: ShellConfig = {};
 
@@ -265,14 +265,139 @@ function prompt(label: string, options: { value: string; desc: string }[], curre
 }
 
 const backend = prompt("backend", [
-    { value: "claude-code", desc: "claude CLI (requires claude)" },
+    { value: "claude-code", desc: "claude CLI (requires claude -p)" },
+    { value: "actual.inc", desc: "Actual Computer Distributed Inference Network" },
     { value: "completions", desc: "/v1/chat/completions API (llama.cpp, ollama, vllm, etc.)" },
 ], config.backend);
 
-// URL and API key prompts for completions backend
-let url = config.url || "";
-let apiKey = config.apiKey || "";
-if (backend === "completions") {
+// Read backend-specific settings from sub-objects (fall back to legacy flat fields)
+const backends = config.backends || {};
+const actualCfg = backends["actual.inc"] || {};
+const compCfg = backends["completions"] || {};
+
+let url = "";
+let apiKey = "";
+let clusterId = "";
+let port = "";
+let model = config.model || DEFAULTS.model;
+
+if (backend === "actual.inc") {
+    url = "https://api.actual.inc";
+    apiKey = actualCfg.apiKey || config.apiKey || "";
+    clusterId = actualCfg.clusterId || config.clusterId || "";
+    port = actualCfg.port || config.port || "";
+
+    // API key — required (but keep existing if saved)
+    const hasActualKey = !!apiKey;
+    const actualKeyHint = hasActualKey ? "(saved, enter to keep)" : "(from Console > API at actual.inc)";
+    process.stdout.write(`\n  ${BOLD}api key${RESET} ${DIM}${actualKeyHint}${RESET}\n`);
+    execSync("stty sane", { stdio: "inherit" });
+    const rl = await import("readline");
+    const iface = rl.createInterface({ input: process.stdin, output: process.stdout });
+    const actualKeyInput = await new Promise<string>((resolve) => {
+        iface.question(`  > `, (answer: string) => {
+            iface.close();
+            resolve(answer.trim());
+        });
+    });
+    if (actualKeyInput) apiKey = actualKeyInput;
+
+    if (!apiKey) {
+        fail("API key required for actual.inc — create one at Console > API");
+        process.exit(1);
+    }
+
+    // Port — for local actual API
+    const defaultPort = port || "8080";
+    process.stdout.write(`\n  ${BOLD}port${RESET} ${DIM}(enter to accept)${RESET}\n`);
+    execSync("stty sane", { stdio: "inherit" });
+    const rlPort = await import("readline");
+    const ifacePort = rlPort.createInterface({ input: process.stdin, output: process.stdout });
+    port = await new Promise<string>((resolve) => {
+        process.stdout.write(`\r\x1b[2K`);
+        ifacePort.question(`  > `, (answer: string) => {
+            ifacePort.close();
+            resolve(answer.trim() || defaultPort);
+        });
+        ifacePort.write(defaultPort);
+    });
+
+    // Auto-fetch cluster ID
+    process.stdout.write(`\n  ${DIM}fetching clusters...${RESET}`);
+    try {
+        const res = await fetch(`${url}/v1/clusters`, {
+            headers: { "Authorization": `Bearer ${apiKey}` },
+        });
+        if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            process.stdout.write(`\r\x1b[2K`);
+            fail(`cluster fetch failed (${res.status}): ${body}`);
+            process.exit(1);
+        }
+        const data = await res.json() as any;
+        const clusters = data?.data || [];
+        process.stdout.write(`\r\x1b[2K`);
+
+        if (clusters.length === 0) {
+            fail("no clusters found — install the actual client first");
+            process.exit(1);
+        } else if (clusters.length === 1) {
+            clusterId = clusters[0].id;
+            const name = clusters[0].name || "unnamed";
+            const online = clusters[0].online_device_count || 0;
+            const total = clusters[0].device_count || 0;
+            ok(`cluster: ${name} (${online}/${total} online)`);
+        } else {
+            // Multiple clusters — let user pick
+            const clusterOptions = clusters.map((c: any) => ({
+                value: c.id,
+                desc: `${c.name || "unnamed"} (${c.online_device_count || 0}/${c.device_count || 0} online)`,
+            }));
+            clusterId = prompt("cluster", clusterOptions, clusterId);
+        }
+    } catch (e: any) {
+        process.stdout.write(`\r\x1b[2K`);
+        fail(`cluster fetch failed: ${e.message}`);
+        process.exit(1);
+    }
+
+    // Auto-fetch models and let user pick
+    process.stdout.write(`\n  ${DIM}fetching models...${RESET}`);
+    try {
+        const res = await fetch(`${url}/v1/models`, {
+            headers: {
+                "Authorization": `Bearer ${apiKey}`,
+                "X-Cluster-ID": clusterId,
+            },
+        });
+        if (!res.ok) {
+            process.stdout.write(`\r\x1b[2K`);
+            warn("could not fetch models — you can set the model later");
+            model = "auto";
+        } else {
+            const data = await res.json() as any;
+            const models = (data?.data || []).map((m: any) => m.id).filter(Boolean);
+            process.stdout.write(`\r\x1b[2K`);
+
+            if (models.length === 0) {
+                warn("no models available — load one in the actual TUI first");
+                model = "auto";
+            } else if (models.length === 1) {
+                model = models[0];
+                ok(`model: ${model}`);
+            } else {
+                const modelOptions = models.map((id: string) => ({ value: id, desc: "" }));
+                model = prompt("model", modelOptions, config.model);
+            }
+        }
+    } catch {
+        process.stdout.write(`\r\x1b[2K`);
+        warn("could not fetch models — you can set the model later");
+        model = "auto";
+    }
+} else if (backend === "completions") {
+    url = compCfg.url || config.url || "";
+    apiKey = compCfg.apiKey || config.apiKey || "";
     const defaultUrl = url || "http://localhost:8080";
     process.stdout.write(`\n  ${BOLD}url${RESET} ${DIM}(enter to accept)${RESET}\n`);
     process.stdout.write(`  > ${defaultUrl}`);
@@ -291,17 +416,20 @@ if (backend === "completions") {
         iface.write(defaultUrl);
     });
 
-    // API key — optional, blank to skip
-    process.stdout.write(`\n  ${BOLD}api key${RESET} ${DIM}(enter to skip)${RESET}\n`);
+    // API key — optional (keep existing if saved)
+    const hasCompKey = !!apiKey;
+    const compKeyHint = hasCompKey ? "(saved, enter to keep)" : "(enter to skip)";
+    process.stdout.write(`\n  ${BOLD}api key${RESET} ${DIM}${compKeyHint}${RESET}\n`);
     execSync("stty sane", { stdio: "inherit" });
     const rl2 = await import("readline");
     const iface2 = rl2.createInterface({ input: process.stdin, output: process.stdout });
-    apiKey = await new Promise<string>((resolve) => {
+    const compKeyInput = await new Promise<string>((resolve) => {
         iface2.question(`  > `, (answer: string) => {
             iface2.close();
             resolve(answer.trim());
         });
     });
+    if (compKeyInput) apiKey = compKeyInput;
 }
 
 const prefix = prompt("prefix", [
@@ -313,9 +441,12 @@ const prefix = prompt("prefix", [
 ], config.prefix);
 
 // Claude-specific options
-let model = config.model || DEFAULTS.model;
 let effort = config.effort || DEFAULTS.effort;
 let session = config.session || DEFAULTS.session;
+
+if (backend !== "actual.inc") {
+    model = config.model || DEFAULTS.model;
+}
 
 if (backend === "claude-code") {
     model = prompt("model", [
@@ -338,7 +469,8 @@ if (backend === "claude-code") {
 }
 
 const perms = prompt("perms", [
-    { value: "ask", desc: "prompt before tool use" },
+    { value: "ask", desc: "prompt before dangerous tools" },
+    { value: "confirm", desc: "prompt before every tool call" },
     { value: "auto", desc: "skip all permission prompts" },
     { value: "plan", desc: "read-only, no writes or execution" },
 ], config.perms);
@@ -349,7 +481,15 @@ const output = prompt("output", [
     { value: "verbose", desc: "full tool output" },
 ], config.output);
 
-config = { prefix, backend, url: url || undefined, apiKey: apiKey || undefined, model, effort, perms, output, session };
+// Merge backend-specific fields into sub-objects, preserving other backends' settings
+const updatedBackends = { ...backends };
+if (backend === "actual.inc") {
+    updatedBackends["actual.inc"] = { url, apiKey, clusterId, port: port || undefined };
+} else if (backend === "completions") {
+    updatedBackends["completions"] = { url, apiKey: apiKey || undefined };
+}
+
+config = { prefix, backend, model, effort, perms, output, session, backends: updatedBackends };
 
 mkdirSync(GLOBAL_DIR, { recursive: true });
 writeFileSync(GLOBAL_CONFIG, JSON.stringify(config, null, 2) + "\n");

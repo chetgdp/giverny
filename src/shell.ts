@@ -35,6 +35,7 @@ export interface RunShellOpts {
     output: string;
     url?: string;
     apiKey?: string;
+    clusterId?: string;
     bridge: Bridge;
 }
 
@@ -49,9 +50,10 @@ interface ShellResult {
 }
 
 export async function runShell(opts: RunShellOpts, sessionId: string | null, approvedTools: Set<string>, overridePerms?: string): Promise<ShellResult> {
-    const { prompt, model, effort, perms, tools, output, url, apiKey, bridge } = opts;
+    const { prompt, model, effort, perms, tools, output, url, apiKey, clusterId, bridge } = opts;
     const effectivePerms = overridePerms || perms;
     const isAskMode = effectivePerms === "ask";
+    const isConfirmMode = effectivePerms === "confirm";
     let killed = false;
 
     const spinner = createSpinner({ effort });
@@ -108,7 +110,8 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
                     }
 
                     // Ask mode: pause before dangerous tools, prompt user
-                    if (isAskMode && !approvedTools.has(block.name) && needsPermission(block.name, block.input)) {
+                    // Confirm mode: pause before ALL tools, no safe-list bypass
+                    if ((isAskMode || isConfirmMode) && !approvedTools.has(block.name) && (isConfirmMode || needsPermission(block.name, block.input))) {
                         control.pause?.();
 
                         // Extra warning for catastrophic commands — flips default to deny
@@ -194,6 +197,7 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
     // deny in -p mode) and handle permissions ourselves via pause/resume.
     // Non-agentLoop backends (completions etc.) need a system prompt —
     // agentLoop backends (claude -p) supply their own.
+    //const systemPrompt = bridge.info.capabilities.agentLoop ? undefined : "";
     const systemPrompt = bridge.info.capabilities.agentLoop ? undefined : TOOL_SYSTEM_PROMPT;
 
     const bridgeResult = await bridge.run(
@@ -204,10 +208,11 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
             sessionId: sessionId || undefined,
             options: {
                 effort,
-                perms: isAskMode ? "auto" : effectivePerms,
+                perms: (isAskMode || isConfirmMode) ? "auto" : effectivePerms,
                 tools,
                 url: url || undefined,
                 apiKey: apiKey || undefined,
+                clusterId: clusterId || undefined,
             },
         },
         onEvent,
@@ -275,7 +280,7 @@ export async function main() {
     const perms = cfg.perms;
     const tools = cfg.tools;
     const output = cfg.output;
-    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, url: cfg.url, apiKey: cfg.apiKey, bridge };
+    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, url: cfg.url, apiKey: cfg.apiKey, clusterId: cfg.clusterId, bridge };
 
     // Session init
     const isFresh = cfg.session === "fresh";

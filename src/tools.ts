@@ -18,6 +18,8 @@ Your execution environment is sh. Use standard Unix tools:
 
 Use Perl
 
+If you cannot use the exec tool directly, write commands in fenced code blocks tagged bash, sh, or shell — they will be extracted and executed automatically.
+
 Think step by step. Check your work after making changes.`;
 
 // OpenAI function calling format — sent to the model in the API request

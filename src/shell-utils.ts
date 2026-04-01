@@ -48,6 +48,7 @@ function registerProject(projectDir: string) {
 
 export function normalizePerms(mode: string): string {
     if (mode === "auto" || mode === "bypass" || mode === "bypassPermissions") return "auto";
+    if (mode === "confirm" || mode === "strict") return "confirm";
     if (mode === "ask" || mode === "safe" || mode === "default") return "ask";
     if (mode === "plan" || mode === "readonly") return "plan";
     return mode;
