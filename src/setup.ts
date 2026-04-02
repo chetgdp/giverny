@@ -38,7 +38,7 @@ const MARKER_NOTE = `# auto-managed by giverny --setup, do not edit between mark
 
 // Replace existing giverny block (between markers) or strip legacy lines, then append fresh block
 function installRcBlock(rcFile: string, block: string) {
-    let content = readFileSync(rcFile, "utf-8");
+    let content = existsSync(rcFile) ? readFileSync(rcFile, "utf-8") : "";
 
     // Remove marker-based block if present
     const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -65,6 +65,7 @@ function installRcBlock(rcFile: string, block: string) {
 const FISH_FN_DIR = join(HOME, ".config/fish/functions");
 const BASHRC = join(HOME, ".bashrc");
 const ZSHRC = join(HOME, ".zshrc");
+const NUSHELL_CONFIG = join(HOME, ".config/nushell/config.nu");
 
 function installFishFn(name: string, fnBody: string) {
     if (!existsSync(FISH_FN_DIR)) {
@@ -108,6 +109,17 @@ end
         const aliasLine = `alias ${prefix}='noglob giverny'`;
         installRcBlock(ZSHRC, aliasLine);
         ok(`zsh (${prefix})`);
+    }
+
+    // Nushell — alias is clean passthrough, no noglob needed
+    let hasNu = false;
+    try { execSync("nu --version", { stdio: ["pipe", "pipe", "pipe"] }); hasNu = true; } catch {}
+    if (hasNu) {
+        const nuDir = join(HOME, ".config/nushell");
+        if (!existsSync(nuDir)) mkdirSync(nuDir, { recursive: true });
+        const aliasLine = `alias "${prefix}" = giverny`;
+        installRcBlock(NUSHELL_CONFIG, aliasLine);
+        ok(`nushell (${prefix})`);
     }
 }
 

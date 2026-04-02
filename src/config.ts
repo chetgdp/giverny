@@ -2,7 +2,7 @@
 // Shared config for bridge, server, and shell modes.
 
 // Bridge-layer env overrides (used by bridge.ts when opts don't specify)
-export const DEFAULT_TIMEOUT = parseInt(process.env.CLAUDE_TIMEOUT || "300000");
+export const DEFAULT_TIMEOUT = parseInt(process.env.CLAUDE_TIMEOUT || "120000");
 export const DEFAULT_EFFORT = process.env.CLAUDE_EFFORT || "high";
 
 export const TAG = "giverny";
@@ -30,6 +30,7 @@ export interface ShellConfig {
     tools?: string;
     output?: string;
     session?: string;
+    timeout?: number;       // seconds — max wall time per invocation (default 120)
     systemPrompt?: string;  // "default" | "none" | custom string (non-agentLoop backends only)
     // Backend-specific (resolved at load time from sub-objects)
     url?: string;
@@ -41,7 +42,7 @@ export interface ShellConfig {
     backends?: Record<string, BackendConfig>;
 }
 
-export const CONFIG_DEFAULTS: Required<Omit<ShellConfig, "backends" | "url" | "apiKey" | "clusterId" | "port">> = {
+export const CONFIG_DEFAULTS: Required<Omit<ShellConfig, "backends" | "url" | "apiKey" | "clusterId" | "port" | "protocol">> = {
     prefix: "@",
     backend: "claude-code",
     model: "opus",
@@ -50,7 +51,8 @@ export const CONFIG_DEFAULTS: Required<Omit<ShellConfig, "backends" | "url" | "a
     tools: "all",
     output: "normal",
     session: "keep",
-    systemPrompt: "default",
+    timeout: 120,
+    systemPrompt: "none",
 };
 
 

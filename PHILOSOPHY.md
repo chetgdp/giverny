@@ -365,4 +365,4 @@ remote
 
 save to file output html
 
-why not do a simple style of building out one full simple error? like not enough space on disk or whatever in save to file
+Why not do a simple style of building out one full simple error? like not enough space on disk or whatever in save to file

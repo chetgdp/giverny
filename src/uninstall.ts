@@ -71,8 +71,10 @@ const MARKER_START = `# ><(((*> giverny start`;
 const MARKER_END = `# <*)))>< giverny end`;
 const BASHRC = join(HOME, ".bashrc");
 const ZSHRC = join(HOME, ".zshrc");
+const NUSHELL_CONFIG = join(HOME, ".config/nushell/config.nu");
 const hasBashrc = existsSync(BASHRC) && readFileSync(BASHRC, "utf-8").includes(MARKER_START);
 const hasZshrc = existsSync(ZSHRC) && readFileSync(ZSHRC, "utf-8").includes(MARKER_START);
+const hasNushell = existsSync(NUSHELL_CONFIG) && readFileSync(NUSHELL_CONFIG, "utf-8").includes(MARKER_START);
 
 const BIN_LINK = join(HOME, ".local/bin/giverny");
 const hasBin = existsSync(BIN_LINK);
@@ -96,11 +98,12 @@ if (purge) {
     }
     if (hasBashrc) console.log(`  ${RED}x${RESET} bash alias block in ~/.bashrc`);
     if (hasZshrc) console.log(`  ${RED}x${RESET} zsh alias block in ~/.zshrc`);
+    if (hasNushell) console.log(`  ${RED}x${RESET} nushell alias block in ~/.config/nushell/config.nu`);
     if (hasBin) console.log(`  ${RED}x${RESET} ~/.local/bin/giverny symlink`);
 }
 
 const hasConfigs = givernyDirs.length > 0;
-const hasShell = hasFish || hasBashrc || hasZshrc || hasBin;
+const hasShell = hasFish || hasBashrc || hasZshrc || hasNushell || hasBin;
 const nothingToDo = !hasConfigs && (!purge || !hasShell);
 
 if (nothingToDo) {
@@ -167,6 +170,7 @@ if (purge) {
 
     if (hasBashrc) removeRcBlock(BASHRC, "bash");
     if (hasZshrc) removeRcBlock(ZSHRC, "zsh");
+    if (hasNushell) removeRcBlock(NUSHELL_CONFIG, "nushell");
 
     if (hasBin) {
         try {

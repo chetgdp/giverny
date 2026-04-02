@@ -34,7 +34,7 @@ const VALID_VERBOSE = ["quiet", "normal", "verbose"];
 const REST_COMMANDS = new Set(["prompt", "compact", "diff"]);
 
 // Commands that consume exactly one argument
-const ONE_ARG_COMMANDS = new Set(["model", "effort", "perms", "tools", "output", "session", "resume", "continue", "export"]);
+const ONE_ARG_COMMANDS = new Set(["model", "effort", "perms", "tools", "output", "session", "timeout", "resume", "continue", "export"]);
 
 interface ParsedCommand {
     name: string;
@@ -370,6 +370,22 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             await saveConfig({ session: s }, isLocal);
             const where = isLocal ? "local" : "global";
             console.log(`session: ${s} ${DIM}(${where})${RESET}`);
+            return chainRemainder(remainder, bridge);
+        }
+        case "timeout": {
+            if (!arg) {
+                console.log(`timeout: ${cfg.timeout || CONFIG_DEFAULTS.timeout}s${sourceTag(sources.timeout)}`);
+                console.log(`  /timeout <seconds> [--local]`);
+                return chainRemainder(remainder, bridge);
+            }
+            const secs = parseInt(arg);
+            if (isNaN(secs) || secs < 10) {
+                console.log(`${RED}timeout must be >= 10 seconds${RESET}`);
+                return true;
+            }
+            await saveConfig({ timeout: secs }, isLocal);
+            const where = isLocal ? "local" : "global";
+            console.log(`timeout: ${secs}s ${DIM}(${where})${RESET}`);
             return chainRemainder(remainder, bridge);
         }
         case "prompt": {

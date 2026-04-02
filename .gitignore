@@ -1,6 +1,7 @@
 .claude/
 .giverny*
 tmp/
+dist/
 
 # research into similar tools
 agent_harness_analysis/

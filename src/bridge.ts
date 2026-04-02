@@ -224,19 +224,35 @@ async function generate(
             // result event = done, don't wait for process to linger
             if (gotResult) break;
         }
+
+        // Flush remaining buffer — if the last line had no trailing \n,
+        // it's still sitting in buffer and was never parsed.
+        if (buffer && !gotResult) {
+            if (!sessionId && buffer.includes('"session_id"')) {
+                try { sessionId = JSON.parse(buffer).session_id; } catch {}
+            }
+            const event = parseNdjsonLine(buffer);
+            if (event) {
+                onEvent(event, control);
+                if (event.type === "result") gotResult = true;
+            }
+        }
     } finally {
         reader.releaseLock();
-        clearTimeout(timer);
     }
 
     if (gotResult) {
         // Clean up without blocking — process may linger after result
+        clearTimeout(timer);
         proc.kill();
         return { ok: true, sessionId };
     }
 
+    // Don't clear timer here — it's the backstop that kills a hung process.
+    // It fires if proc.exited never resolves.
     await stderrDrain;
     const exitCode = await proc.exited;
+    clearTimeout(timer);
 
     if (exitCode !== 0) {
         return { ok: false, sessionId, error: stderrText || `claude exited with code ${exitCode}` };

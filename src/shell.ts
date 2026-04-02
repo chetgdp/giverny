@@ -33,6 +33,7 @@ export interface RunShellOpts {
     perms: string;
     tools: string;
     output: string;
+    timeout?: number;
     systemPrompt?: string;
     url?: string;
     apiKey?: string;
@@ -210,6 +211,7 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
             model,
             systemPrompt,
             sessionId: sessionId || undefined,
+            timeout: opts.timeout ? opts.timeout * 1000 : undefined,
             options: {
                 effort,
                 perms: (isAskMode || isConfirmMode) ? "auto" : effectivePerms,
@@ -284,7 +286,7 @@ export async function main() {
     const perms = cfg.perms;
     const tools = cfg.tools;
     const output = cfg.output;
-    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, systemPrompt: cfg.systemPrompt, url: cfg.url, apiKey: cfg.apiKey, clusterId: cfg.clusterId, bridge };
+    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, timeout: cfg.timeout, systemPrompt: cfg.systemPrompt, url: cfg.url, apiKey: cfg.apiKey, clusterId: cfg.clusterId, bridge };
 
     // Session init — detect backend/session mismatch from backend switches.
     // claude-code needs UUID sessions; completions/responses use conv-* IDs.

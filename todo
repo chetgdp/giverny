@@ -1,9 +1,11 @@
 ## todo next
-- [x] v1/responses support
-- [x] fix base system prompt, no prompt and set prompt and shell agent mode
-- [x] chaining giverny commands ex ? /prompt none /keep hello
+- [] fix base system prompt for agent mode
+    - [x] easily editable in its own file
+    - [] polish shell agent idea
 - [] still hanging after some toolcalls
-- [] nushell
+    - [x] drain stderr bug
+    - [x] user set timeout?
+    - maybe still broke idk, keep this up here
 - [] column length issue with spinner and time
     - [] iSH repeating spinner on each newline (column width too wide?)
 - [] escape codes appearing inside nvim `:!` mode
@@ -20,6 +22,7 @@
     - [] show other animations with commands?
     - [x] time in m and s
     - [] option to disable spinner
+    - [] dark mode light mode theme
 - [] clawd svg
 - [] bridge svg logo?
 
@@ -28,7 +31,7 @@
 - [] v1 point giverny at any LLM completions api to use any model
 - v2 shell RL pico model | rust rewrite
 
-## upcoming features
+# upcoming features
 
 ### v1.0+
 global sessions (tailscale) point to one ip where llm is hosted (llama-server mode). It keeps the session data local to itself (how anthropic does resume). But with the same session_id you can have a global session in the sense that you can invoke the same session from multiple PCs. This means multi user sessions and different computer cntexts across one singular session.
@@ -51,12 +54,14 @@ the point is that we are testing this with claude but the real killer is a compo
 - support (Powershell... Windows...) (not happening on TS prototype build, have to use Rust to deal with cross compatability)
 - [] pick config for giverny -s other than claude code? (not the point)
 - [] context window over large sessions? (low % feature)
+- [] add a user set end pipe auto configured (ex user wants | glow after each output) (not what giverny is supposed to do, we adapt to env, not force it to adapt to use, simple power user extension) (worth considering adding to our setup)
 
 - ~~install to selected shells, how to detect installed shells?~~
 - ~~tok/s? backend agnostic?~~
 - ~~writing to root /tmp/c when given ./tmp/c (haiku) (bandaid fix to base model behavior)~~
 
 ## known issues
+- nushell pipe chains leak terminal escape responses (OSC 10, DSR) — nushell tty isolation issue, not giverny (? /last | cat | glow works though)
 
 
 ----
@@ -115,3 +120,7 @@ the point is that we are testing this with claude but the real killer is a compo
     - [x] small 7-14b
     - [x] tiny 1-3b
     - [x] nano 0.5b
+- [x] v1/responses support
+- [x] no prompt and set prompt and shell agent mode
+- [x] chaining giverny commands ex ? /prompt none /keep hello
+- [x] nushell

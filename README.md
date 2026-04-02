@@ -110,6 +110,26 @@ Pipe-in: when stdin isn't a TTY, giverny reads it and appends to your prompt arg
 wl-paste | ? review this                  # clipboard contents appended to prompt
 ```
 
+#### rendering and processing
+Giverny outputs clean text when piped, so the environment's own tools become your renderer. No built-in markdown engine, no syntax highlighter — pipe to whatever you already have.
+
+```sh
+? explain this function | glow          # markdown rendering
+? show me the code | bat -l ts          # syntax highlighted
+? summarize this | wl-copy              # straight to clipboard
+? review this PR | tee notes.md | glow  # render and save
+```
+
+To make it automatic, put the pipe in your alias:
+```fish
+# fish
+function ? ; giverny $argv | glow ; end
+```
+```nu
+# nushell
+def "?" [...rest] { giverny ...$rest | glow }
+```
+
 #### ralph wiggum loop
 The [ralph wiggum loop](https://awesomeclaude.ai/ralph-wiggum) feeds Claude the same prompt in a `while true` until a PRD is done. Giverny replaces the flag wall with `@`.
 
