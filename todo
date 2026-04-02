@@ -3,10 +3,10 @@
 - [x] fix base system prompt, no prompt and set prompt and shell agent mode
 - [x] chaining giverny commands ex ? /prompt none /keep hello
 - [] still hanging after some toolcalls
+- [] nushell
 - [] column length issue with spinner and time
     - [] iSH repeating spinner on each newline (column width too wide?)
 - [] escape codes appearing inside nvim `:!` mode
-- [] nushell
 - [] general refactor
 - [] terminal bench harbor benchmark [x] giverny controls setup vs inference backend setup (two flows, one combined)
 

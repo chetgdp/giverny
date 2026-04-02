@@ -116,10 +116,16 @@ function parseNdjsonLine(line: string): BridgeEvent | null {
                 for (const block of content) {
                     if (block.type === "tool_result") {
                         const tr = event.tool_use_result;
+                        // content can be string or array of {type:"text",text:""} blocks
+                        const content = typeof block.content === "string"
+                            ? block.content
+                            : Array.isArray(block.content)
+                                ? block.content.map((c: any) => c.text || "").join("")
+                                : "";
                         return {
                             type: "tool_result" as const,
                             toolUseId: block.tool_use_id || "",
-                            content: typeof block.content === "string" ? block.content : "",
+                            content,
                             stdout: tr?.stdout || "",
                             stderr: tr?.stderr || "",
                             isError: !!block.is_error,
@@ -184,6 +190,11 @@ async function generate(
 
     const timer = setTimeout(() => proc.kill(), timeout);
 
+    // Drain stderr in background to prevent pipe buffer saturation (64KB).
+    // If claude blocks on a stderr write, stdout stalls and we hang.
+    let stderrText = "";
+    const stderrDrain = new Response(proc.stderr).text().then(s => { stderrText = s; });
+
     const reader = proc.stdout.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -224,11 +235,11 @@ async function generate(
         return { ok: true, sessionId };
     }
 
-    const stderr = await new Response(proc.stderr).text();
+    await stderrDrain;
     const exitCode = await proc.exited;
 
     if (exitCode !== 0) {
-        return { ok: false, sessionId, error: stderr || `claude exited with code ${exitCode}` };
+        return { ok: false, sessionId, error: stderrText || `claude exited with code ${exitCode}` };
     }
 
     return { ok: true, sessionId };

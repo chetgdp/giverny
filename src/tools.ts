@@ -43,6 +43,9 @@ export const TOOL_SCHEMAS = [
     },
 ];
 
+// Per-tool timeout — kills commands that hang (waiting for stdin, infinite loops, etc.)
+const TOOL_TIMEOUT = 120_000; // 2 minutes
+
 // Execute a tool call. Returns stdout, stderr, and whether it errored.
 export async function executeTool(
     name: string,
@@ -59,11 +62,19 @@ export async function executeTool(
         stderr: "pipe",
     });
 
+    const timer = setTimeout(() => proc.kill(), TOOL_TIMEOUT);
+
     const [stdout, stderr, exitCode] = await Promise.all([
         new Response(proc.stdout).text(),
         new Response(proc.stderr).text(),
         proc.exited,
     ]);
+
+    clearTimeout(timer);
+
+    if (exitCode === null || (exitCode !== 0 && !stdout && !stderr)) {
+        return { stdout: "", stderr: `Command timed out after ${TOOL_TIMEOUT / 1000}s`, isError: true };
+    }
 
     return { stdout, stderr, isError: exitCode !== 0 };
 }
