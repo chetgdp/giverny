@@ -7,10 +7,13 @@
 *   --setup prefs    prefix, session, perms, output
 */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, readSync, closeSync, unlinkSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
-import { VALID_PREFIXES, CONFIG_DEFAULTS, type ShellConfig } from "./config";
+import { VALID_PREFIXES, CONFIG_DEFAULTS, type ShellConfig, HOME, GLOBAL_DIR, FISH_FN_DIR, BASHRC, ZSHRC, NUSHELL_CONFIG, readClaudeAuth } from "./config";
+import { DIM, BOLD, GREEN, RED, YELLOW, RESET } from "./shell-utils";
+import { installRcBlock } from "./rc-block";
+import { selectPrompt } from "./tui";
 
 const auto = process.argv.includes("auto");
 const setupArg = process.argv.find(a => a === "backend" || a === "prefs");
@@ -18,54 +21,12 @@ const mode = setupArg || "full";
 const runBackend = mode === "full" || mode === "backend";
 const runPrefs = mode === "full" || mode === "prefs";
 
-const HOME = process.env.HOME || "~";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const YELLOW = "\x1b[33m";
-const RESET = "\x1b[0m";
-
 const ok = (msg: string) => console.log(`  ${GREEN}[ok]${RESET} ${msg}`);
 const warn = (msg: string) => console.log(`  ${YELLOW}[--]${RESET} ${msg}`);
 const fail = (msg: string) => console.log(`  ${RED}[!!]${RESET} ${msg}`);
 
 // ── Shell alias utilities ─────────────────────────────────────────────────── //
 
-const MARKER_START = `# ><(((*> giverny start`;
-const MARKER_END = `# <*)))>< giverny end`;
-const MARKER_NOTE = `# auto-managed by giverny --setup, do not edit between markers`;
-
-// Replace existing giverny block (between markers) or strip legacy lines, then append fresh block
-function installRcBlock(rcFile: string, block: string) {
-    let content = existsSync(rcFile) ? readFileSync(rcFile, "utf-8") : "";
-
-    // Remove marker-based block if present
-    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const markerRe = new RegExp(`\\n?${esc(MARKER_START)}[\\s\\S]*?${esc(MARKER_END)}`, "g");
-    content = content.replace(markerRe, "");
-
-    // Also strip legacy lines (pre-marker installs)
-    const lines = content.split("\n");
-    const filtered: string[] = [];
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i] === "# giverny shell mode") {
-            while (i + 1 < lines.length && (/^set \+H$/.test(lines[i + 1]) || /^function [,?@+_]\(\).*giverny/.test(lines[i + 1]))) i++;
-            continue;
-        }
-        filtered.push(lines[i]);
-    }
-    content = filtered.join("\n");
-
-    content = content.replace(/\n{3,}/g, "\n\n").trimEnd();
-    const wrapped = `${MARKER_START}\n${MARKER_NOTE}\n${block}\n${MARKER_END}`;
-    writeFileSync(rcFile, content + `\n\n${wrapped}\n`);
-}
-
-const FISH_FN_DIR = join(HOME, ".config/fish/functions");
-const BASHRC = join(HOME, ".bashrc");
-const ZSHRC = join(HOME, ".zshrc");
-const NUSHELL_CONFIG = join(HOME, ".config/nushell/config.nu");
 
 function installFishFn(name: string, fnBody: string) {
     if (!existsSync(FISH_FN_DIR)) {
@@ -125,7 +86,6 @@ end
 
 // ── Global config ────────────────────────────────────────────────────────── //
 
-const GLOBAL_DIR = join(HOME, ".giverny");
 const GLOBAL_CONFIG = join(GLOBAL_DIR, "config.json");
 
 // Defaults from the single source of truth in config.ts
@@ -157,13 +117,10 @@ if (runBackend) {
         }
 
         if (claudeFound) {
-            try {
-                const creds = JSON.parse(readFileSync(join(HOME, ".claude/.credentials.json"), "utf-8"));
-                const oauth = creds.claudeAiOauth || {};
-                const sub = oauth.subscriptionType || "unknown";
-                const tier = oauth.rateLimitTier || "";
-                ok(`authenticated: ${sub}${tier ? ` (${tier})` : ""}`);
-            } catch {
+            const { subscription, rateTier } = readClaudeAuth();
+            if (subscription) {
+                ok(`authenticated: ${subscription}${rateTier ? ` (${rateTier})` : ""}`);
+            } else {
                 warn("not authenticated (run 'claude' to log in)");
             }
         }
@@ -190,101 +147,9 @@ if (auto) {
 const headerLabel = mode === "backend" ? "backend config" : mode === "prefs" ? "preferences" : "global config";
 console.log(`\n${BOLD}${headerLabel}${RESET} ${DIM}(~/.giverny/config.json)${RESET}`);
 
-// Interactive prompts — arrow key / j/k select, number to jump, enter to confirm
+// Wrapper: resolve hard default from CONFIG_DEFAULTS by label name
 function prompt(label: string, options: { value: string; desc: string }[], current?: string): string {
-    const hardDefault = DEFAULTS[label] || options[0].value;
-    const defaultVal = current || hardDefault;
-    let selected = options.findIndex(o => o.value === defaultVal);
-    if (selected < 0) selected = 0;
-
-    function line(i: number): string {
-        const marker = i === selected ? ">" : " ";
-        const highlight = i === selected ? BOLD : DIM;
-        const tag = options[i].value === hardDefault ? ` ${DIM}(default)${RESET}` : "";
-        const full = `  ${marker} ${i + 1}) ${highlight}${options[i].value}${RESET}  ${DIM}${options[i].desc}${RESET}${tag}`;
-        // Truncate to terminal width to prevent line wrap (which breaks re-render)
-        const cols = process.stdout.columns || 80;
-        const visible = full.replace(/\x1b\[[0-9;]*m/g, "");
-        if (visible.length <= cols) return full;
-        // Cut the description short, keeping ANSI reset at the end
-        const overflow = visible.length - cols;
-        const descTrunc = options[i].desc.slice(0, -(overflow + 1));
-        return `  ${marker} ${i + 1}) ${highlight}${options[i].value}${RESET}  ${DIM}${descTrunc}${RESET}`;
-    }
-
-    function render() {
-        // Move cursor up to first option line, clear and rewrite
-        process.stdout.write(`\x1b[${options.length}A`);
-        for (let i = 0; i < options.length; i++) {
-            process.stdout.write(`\r\x1b[2K${line(i)}\r\n`);
-        }
-    }
-
-    // Initial render (before raw mode, so console.log is fine)
-    console.log(`\n  ${BOLD}${label}${RESET} ${DIM}(arrows + enter)${RESET}`);
-    for (let i = 0; i < options.length; i++) {
-        console.log(line(i));
-    }
-
-    // Raw mode for arrow keys
-    process.stdout.write("\x1b[?25l"); // hide cursor
-    execSync("stty raw -echo", { stdio: "inherit" });
-
-    const fd = openSync("/dev/tty", "r");
-    const buf = Buffer.alloc(3);
-
-    try {
-        while (true) {
-            const n = readSync(fd, buf, 0, 3);
-
-            // Ctrl+C or Escape — abort
-            if (buf[0] === 0x03 || (n === 1 && buf[0] === 0x1b)) {
-                closeSync(fd);
-                execSync("stty sane", { stdio: "inherit" });
-                process.stdout.write("\x1b[?25h\n");
-                process.exit(130);
-            }
-
-            // Enter
-            if (buf[0] === 0x0d || buf[0] === 0x0a) break;
-
-            // Arrow keys: \x1b [ A/B
-            if (n === 3 && buf[0] === 0x1b && buf[1] === 0x5b) {
-                if (buf[2] === 0x41) { // Up
-                    selected = (selected - 1 + options.length) % options.length;
-                    render();
-                } else if (buf[2] === 0x42) { // Down
-                    selected = (selected + 1) % options.length;
-                    render();
-                }
-            }
-
-            // Number keys — select and confirm immediately
-            if (n === 1 && buf[0] >= 0x31 && buf[0] <= 0x39) {
-                const num = buf[0] - 0x30; // 1-9
-                if (num >= 1 && num <= options.length) {
-                    selected = num - 1;
-                    render();
-                    break;
-                }
-            }
-
-            // j/k vim keys
-            if (n === 1 && buf[0] === 0x6b) { // k = up
-                selected = (selected - 1 + options.length) % options.length;
-                render();
-            } else if (n === 1 && buf[0] === 0x6a) { // j = down
-                selected = (selected + 1) % options.length;
-                render();
-            }
-        }
-    } finally {
-        closeSync(fd);
-        execSync("stty sane", { stdio: "inherit" });
-        process.stdout.write("\x1b[?25h"); // show cursor
-    }
-
-    return options[selected].value;
+    return selectPrompt(label, options, { current, defaultValue: DEFAULTS[label] || options[0].value });
 }
 
 // Read backend sub-configs from existing config

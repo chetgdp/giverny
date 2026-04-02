@@ -1,16 +1,30 @@
+## general refactor (WE ARE DOING IT)
+- easy mode dedup fixes
+- deeper architectureal stuff
+- study vt100 protocol to understand REPL and escape codes
+
+### reading the code
+- run.ts → see how args pick the mode
+- src/shell.ts → the primary interface (interactive + piped)
+- src/bridge-loop.ts → Bridge class, the central abstraction everything talks to
+- src/backend.ts → Backend interface contract (short, defines the shape)
+- src/bridge.ts → claude-code backend (claude -p wrapper, NDJSON parsing)
+- Commands: src/commands.ts (slash commands like /model, /prompt)
+- State: src/state.ts (config, sessions, usage tracking)
+- Server mode: src/server.ts → src/protocol.ts
+- Tools: src/tools.ts (tool definitions for non-claude-code backends)
+- Shell utilities: src/shell-utils.ts (permissions, formatting)
+
 ## todo next
-- [] fix base system prompt for agent mode
-    - [x] easily editable in its own file
-    - [] polish shell agent idea
+- [] general refactor
+- [] play unix commnads more for edge cases
 - [] still hanging after some toolcalls
     - [x] drain stderr bug
     - [x] user set timeout?
+    - [x] await proc.exited after kil
     - maybe still broke idk, keep this up here
-- [] column length issue with spinner and time
-    - [] iSH repeating spinner on each newline (column width too wide?)
-- [] escape codes appearing inside nvim `:!` mode
-- [] general refactor
 - [] terminal bench harbor benchmark [x] giverny controls setup vs inference backend setup (two flows, one combined)
+
 
 ## todo goodies
 - [x] kaomojis for ...thinking... (╯°益°)╯彡┻━┻
@@ -21,8 +35,8 @@
     - [x] /tableflip command
     - [] show other animations with commands?
     - [x] time in m and s
-    - [] option to disable spinner
     - [] dark mode light mode theme
+    - [] option to disable spinner (no?)
 - [] clawd svg
 - [] bridge svg logo?
 
@@ -55,6 +69,7 @@ the point is that we are testing this with claude but the real killer is a compo
 - [] pick config for giverny -s other than claude code? (not the point)
 - [] context window over large sessions? (low % feature)
 - [] add a user set end pipe auto configured (ex user wants | glow after each output) (not what giverny is supposed to do, we adapt to env, not force it to adapt to use, simple power user extension) (worth considering adding to our setup)
+- [] polish shell agent prompt idea
 
 - ~~install to selected shells, how to detect installed shells?~~
 - ~~tok/s? backend agnostic?~~
@@ -74,7 +89,6 @@ the point is that we are testing this with claude but the real killer is a compo
 - [x] execute bash commands
 - [x] perms mini tui fix
 - [x] chaining posix commands, pipes and other normal bash stuff integrated
-    - [] play with this more for edge cases
 - [x] clean up server mode step 1 (naive refactor)
 - [x] simple unit test suite
 - [x] get all claude code commands working
@@ -124,3 +138,7 @@ the point is that we are testing this with claude but the real killer is a compo
 - [x] no prompt and set prompt and shell agent mode
 - [x] chaining giverny commands ex ? /prompt none /keep hello
 - [x] nushell
+- [x] column length issue with spinner and time
+    - [x] iSH repeating spinner on each newline (column width too wide?)
+- [x] escape codes appearing inside nvim `:!` mode (added DUMB mode for no tty)
+- [x] fix base system prompt for agent mode easily editable in its own file

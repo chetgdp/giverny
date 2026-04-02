@@ -2,7 +2,7 @@
 // Kaomoji spinner for shell mode.
 // Uses combobulation animations instead of braille dots.
 
-import { getKaomojiSet, KAOMOJI, ui, ORANGE, DIM, RESET } from "./shell-utils";
+import { getKaomojiSet, KAOMOJI, displayWidth, ui, DUMB, ORANGE, DIM, RESET } from "./shell-utils";
 
 export interface SpinnerCtx {
     effort: string;
@@ -24,10 +24,29 @@ export function createSpinner(ctx: SpinnerCtx) {
     let flipFrame = 0;
     let nextFlipAt = 42;
 
+    // Dumb mode (nvim :!, no TTY): kaomoji face + slow dots, no escape codes
+    if (DUMB) {
+        let dumbInterval: ReturnType<typeof setInterval> | null = null;
+        return {
+            ctx,
+            start(label: string) {
+                if (dumbInterval) { clearInterval(dumbInterval); dumbInterval = null; }
+                const face = getKaomojiSet(label).frames[0];
+                ui.write(`${ORANGE}${face}`);
+                dumbInterval = setInterval(() => ui.write(" ."), 2000);
+            },
+            stop() {
+                if (dumbInterval) { clearInterval(dumbInterval); dumbInterval = null; }
+                ui.write(`${RESET}\n`);
+            },
+        };
+    }
+
     return {
         ctx,
         start(label: string) {
-            this.stop();
+            // Clear interval without clearing the line — render() overwrites in place
+            if (intervalId) { clearInterval(intervalId); intervalId = null; }
             i = 0;
             // "thinking" is conveyed by the kaomoji — no need for the word
             const showLabel = label !== "thinking";
@@ -72,12 +91,36 @@ export function createSpinner(ctx: SpinnerCtx) {
                     face = current.frames[i++ % current.frames.length];
                 }
 
-                // \x1b[33G anchors time so kaomoji width changes don't jitter
+                // Face always renders. Metadata is progressive: only shown if terminal is wide enough.
+                const cols = ui.columns || 80;
+                const metaCol = 27; // column where metadata starts (after max 25-col kaomoji + gap)
                 const mins = Math.floor(totalElapsed / 60);
                 const secs = totalElapsed % 60;
                 const time = mins > 0 ? `${mins}m${secs.toString().padStart(2, "0")}s` : `${secs}s`;
-                const toolCol = showLabel ? label.padEnd(12) : "".padEnd(12);
-                ui.write(`\r\x1b[K${ORANGE}${face}${RESET}\x1b[33G${DIM}${time} · ${this.ctx.effort} · ${toolCol}${RESET}`);
+                const toolLabel = showLabel ? label : "";
+
+                // Build metadata string progressively based on available space
+                let meta = "";
+                const remaining = cols - metaCol;
+                if (remaining >= time.length) {
+                    meta = time;
+                    if (remaining >= meta.length + 3 + this.ctx.effort.length) {
+                        meta += ` · ${this.ctx.effort}`;
+                        if (toolLabel && remaining >= meta.length + 3 + toolLabel.length) {
+                            meta += ` · ${toolLabel}`;
+                        }
+                    }
+                }
+
+                // Overwrite in place: face → pad to metaCol → metadata → clear remainder.
+                // No \x1b[K before content — avoids blank-frame flicker.
+                const faceW = displayWidth(face);
+                const pad = Math.max(1, metaCol - 1 - faceW);
+                if (meta) {
+                    ui.write(`\r${ORANGE}${face}${RESET}${' '.repeat(pad)}${DIM}${meta}${RESET}\x1b[K`);
+                } else {
+                    ui.write(`\r${ORANGE}${face}${RESET}\x1b[K`);
+                }
             };
 
             render(); // first frame immediately

@@ -1,9 +1,38 @@
 // config.ts
 // Shared config for bridge, server, and shell modes.
 
+import { join } from "path";
+import { readFileSync } from "fs";
+
 // Bridge-layer env overrides (used by bridge.ts when opts don't specify)
 export const DEFAULT_TIMEOUT = parseInt(process.env.CLAUDE_TIMEOUT || "120000");
 export const DEFAULT_EFFORT = process.env.CLAUDE_EFFORT || "high";
+
+// Shared paths -------------------------------------------------------------- /
+
+export const HOME = process.env.HOME || "~";
+export const GLOBAL_DIR = join(HOME, ".giverny");
+
+// Shell RC file paths (setup + uninstall)
+export const FISH_FN_DIR = join(HOME, ".config/fish/functions");
+export const BASHRC = join(HOME, ".bashrc");
+export const ZSHRC = join(HOME, ".zshrc");
+export const NUSHELL_CONFIG = join(HOME, ".config/nushell/config.nu");
+
+// Claude auth --------------------------------------------------------------- /
+
+export function readClaudeAuth(): { subscription: string; rateTier: string } {
+    try {
+        const creds = JSON.parse(readFileSync(join(HOME, ".claude/.credentials.json"), "utf-8"));
+        const oauth = creds.claudeAiOauth || {};
+        return {
+            subscription: oauth.subscriptionType || "unknown",
+            rateTier: oauth.rateLimitTier || "",
+        };
+    } catch {
+        return { subscription: "", rateTier: "" };
+    }
+}
 
 export const TAG = "giverny";
 

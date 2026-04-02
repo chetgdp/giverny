@@ -9,9 +9,7 @@
 
 import { mkdirSync, existsSync, readFileSync, writeFileSync, openSync, readSync, closeSync } from "fs";
 import { join } from "path";
-
-const HOME = process.env.HOME || "~";
-const GLOBAL_DIR = join(HOME, ".giverny");
+import { HOME, GLOBAL_DIR } from "./config";
 const PROJECTS_FILE = join(GLOBAL_DIR, "projects.json");
 
 export async function loadJSON<T>(filePath: string, defaultValue: T): Promise<T> {
@@ -156,6 +154,33 @@ export function isDangerousCommand(command: string): string | null {
     return null;
 }
 
+// Terminal display width ---------------------------------------------------- /
+// Approximates wcwidth for column-aware rendering (kaomoji contain CJK/fullwidth chars).
+
+export function displayWidth(s: string): number {
+    let w = 0;
+    for (const ch of s) {
+        const cp = ch.codePointAt(0)!;
+        // Zero-width: control chars, combining marks
+        if (cp < 32 || (cp >= 0x7F && cp < 0xA0) || (cp >= 0x0300 && cp <= 0x036F)) continue;
+        // Fullwidth / wide: CJK, Hangul, fullwidth forms, katakana (not halfwidth)
+        if (
+            (cp >= 0x1100 && cp <= 0x115F) ||  // Hangul Jamo
+            (cp >= 0x2E80 && cp <= 0xA4CF && cp !== 0x303F) ||  // CJK .. Yi
+            (cp >= 0xAC00 && cp <= 0xD7A3) ||  // Hangul Syllables
+            (cp >= 0xF900 && cp <= 0xFAFF) ||  // CJK Compat Ideographs
+            (cp >= 0xFE10 && cp <= 0xFE19) ||  // Vertical forms
+            (cp >= 0xFE30 && cp <= 0xFE6F) ||  // CJK Compat Forms
+            (cp >= 0xFF01 && cp <= 0xFF60) ||  // Fullwidth Forms
+            (cp >= 0xFFE0 && cp <= 0xFFE6) ||  // Fullwidth Signs
+            (cp >= 0x20000 && cp <= 0x2FFFD) ||
+            (cp >= 0x30000 && cp <= 0x3FFFD)
+        ) { w += 2; continue; }
+        w += 1;
+    }
+    return w;
+}
+
 // Kaomoji (combobulation) -------------------------------------------------- /
 // Subtle 2-3 frame flipbook animations for different shell states.
 // Each set is a tight loop of the SAME character with small variations.
@@ -284,23 +309,30 @@ export function summarizeTool(name: string, input: any): string {
     return (TOOL_SUMMARIES[name] || ((i: any) => JSON.stringify(i).slice(0, 80)))(input);
 }
 
-// ANSI constants ----------------------------------------------------------- /
-
-export const DIM = "\x1b[2m";
-export const RED = "\x1b[31m";
-export const BOLD = "\x1b[1m";
-export const ORANGE = "\x1b[38;2;255;175;135m";
-export const SEA_GREEN = "\x1b[38;5;43m";
-export const BLUE = "\x1b[38;5;75m";
-export const RESET = "\x1b[0m";
-export const INV = "\x1b[7m";
-
 // Output routing ----------------------------------------------------------- /
 // When stdout is piped (e.g. `? explain | wl-copy`), decoration goes to
 // stderr so the pipe gets clean text only.
+// DUMB = neither stdout nor stderr is a TTY (e.g. nvim :! mode).
+// In dumb mode, all ANSI formatting is suppressed.
 
 export const PIPED = !process.stdout.isTTY;
+export const DUMB = !process.stdout.isTTY && !process.stderr.isTTY;
 export const ui = PIPED ? process.stderr : process.stdout;
+
+// ANSI constants ----------------------------------------------------------- /
+// Suppressed in dumb mode (nvim :!) — truecolor/256 escapes render as raw text.
+// The color you see in :! is nvim's stderr highlighting, not ours.
+
+export const DIM = DUMB ? "" : "\x1b[2m";
+export const RED = DUMB ? "" : "\x1b[31m";
+export const GREEN = DUMB ? "" : "\x1b[32m";
+export const YELLOW = DUMB ? "" : "\x1b[33m";
+export const BOLD = DUMB ? "" : "\x1b[1m";
+export const ORANGE = DUMB ? "" : "\x1b[38;2;255;175;135m";
+export const SEA_GREEN = DUMB ? "" : "\x1b[38;5;43m";
+export const BLUE = DUMB ? "" : "\x1b[38;5;75m";
+export const RESET = DUMB ? "" : "\x1b[0m";
+export const INV = DUMB ? "" : "\x1b[7m";
 
 // Permission prompt -------------------------------------------------------- /
 // Compact horizontal selector with arrow key navigation.

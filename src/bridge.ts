@@ -8,7 +8,7 @@
 * Used via Bridge (bridge-loop.ts) by server.ts and shell.ts.
 */
 
-import { DEFAULT_EFFORT, DEFAULT_TIMEOUT, log } from "./config";
+import { DEFAULT_EFFORT, DEFAULT_TIMEOUT, log, readClaudeAuth } from "./config";
 import type {
     Backend,
     BackendInfo,
@@ -242,9 +242,11 @@ async function generate(
     }
 
     if (gotResult) {
-        // Clean up without blocking — process may linger after result
         clearTimeout(timer);
         proc.kill();
+        // Wait for process to actually exit so stderr pipe closes
+        // and the stderrDrain reader doesn't keep the event loop alive
+        await proc.exited;
         return { ok: true, sessionId };
     }
 
@@ -269,17 +271,9 @@ async function checkStatus(): Promise<Record<string, string>> {
         version = Bun.spawnSync(["claude", "--version"]).stdout.toString().trim();
     } catch {}
 
-    let subscription = "unknown";
-    let rateTier = "";
-    try {
-        const { join } = await import("path");
-        const creds = JSON.parse(await Bun.file(join(process.env.HOME || "~", ".claude/.credentials.json")).text());
-        const oauth = creds.claudeAiOauth || {};
-        subscription = oauth.subscriptionType || "unknown";
-        rateTier = oauth.rateLimitTier || "";
-    } catch {}
+    const { subscription, rateTier } = readClaudeAuth();
 
-    return { version, subscription, rateTier };
+    return { version, subscription: subscription || "unknown", rateTier };
 }
 
 // Backend export ---------------------------------------------------------- //

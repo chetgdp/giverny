@@ -4,18 +4,13 @@
 * giverny --uninstall --purge Also remove shell aliases, fish functions, and binary symlink
 */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, openSync, readSync, closeSync } from "fs";
+import { existsSync, readFileSync, unlinkSync, openSync, readSync, closeSync } from "fs";
 import { join } from "path";
 import { execSync } from "child_process";
 import { rm } from "fs/promises";
-import { VALID_PREFIXES } from "./config";
-
-const HOME = process.env.HOME || "~";
-const DIM = "\x1b[2m";
-const BOLD = "\x1b[1m";
-const GREEN = "\x1b[32m";
-const RED = "\x1b[31m";
-const RESET = "\x1b[0m";
+import { VALID_PREFIXES, HOME, GLOBAL_DIR, FISH_FN_DIR, BASHRC, ZSHRC, NUSHELL_CONFIG } from "./config";
+import { DIM, BOLD, GREEN, RED, RESET } from "./shell-utils";
+import { MARKER_START, removeRcBlock } from "./rc-block";
 
 const ok = (msg: string) => console.log(`  ${GREEN}[ok]${RESET} ${msg}`);
 const skip = (msg: string) => console.log(`  ${DIM}[--] ${msg}${RESET}`);
@@ -26,7 +21,6 @@ const purge = process.argv.includes("--purge");
 
 console.log(`\n${BOLD}giverny ${purge ? "purge" : "uninstall"}${RESET}\n`);
 
-const GLOBAL_DIR = join(HOME, ".giverny");
 const PROJECTS_FILE = join(GLOBAL_DIR, "projects.json");
 
 // Collect all .giverny directories: global + registered projects
@@ -61,17 +55,11 @@ if (existsSync(PROJECTS_FILE)) {
 }
 
 // Shell alias + binary locations (purge only)
-const FISH_FN_DIR = join(HOME, ".config/fish/functions");
 const fishFiles = VALID_PREFIXES
     .map(ch => join(FISH_FN_DIR, `${ch}.fish`))
     .filter(f => existsSync(f));
 const hasFish = fishFiles.length > 0;
 
-const MARKER_START = `# ><(((*> giverny start`;
-const MARKER_END = `# <*)))>< giverny end`;
-const BASHRC = join(HOME, ".bashrc");
-const ZSHRC = join(HOME, ".zshrc");
-const NUSHELL_CONFIG = join(HOME, ".config/nushell/config.nu");
 const hasBashrc = existsSync(BASHRC) && readFileSync(BASHRC, "utf-8").includes(MARKER_START);
 const hasZshrc = existsSync(ZSHRC) && readFileSync(ZSHRC, "utf-8").includes(MARKER_START);
 const hasNushell = existsSync(NUSHELL_CONFIG) && readFileSync(NUSHELL_CONFIG, "utf-8").includes(MARKER_START);
@@ -159,18 +147,9 @@ if (purge) {
         console.log(`  ${DIM}     open a new terminal to unload from this session${RESET}`);
     }
 
-    function removeRcBlock(rcFile: string, shellName: string) {
-        let content = readFileSync(rcFile, "utf-8");
-        const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const markerRe = new RegExp(`\\n?${esc(MARKER_START)}[\\s\\S]*?${esc(MARKER_END)}\\n?`, "g");
-        const cleaned = content.replace(markerRe, "").replace(/\n{3,}/g, "\n\n").trimEnd() + "\n";
-        writeFileSync(rcFile, cleaned);
-        ok(`removed ${shellName} alias block`);
-    }
-
-    if (hasBashrc) removeRcBlock(BASHRC, "bash");
-    if (hasZshrc) removeRcBlock(ZSHRC, "zsh");
-    if (hasNushell) removeRcBlock(NUSHELL_CONFIG, "nushell");
+    if (hasBashrc) { removeRcBlock(BASHRC); ok("removed bash alias block"); }
+    if (hasZshrc) { removeRcBlock(ZSHRC); ok("removed zsh alias block"); }
+    if (hasNushell) { removeRcBlock(NUSHELL_CONFIG); ok("removed nushell alias block"); }
 
     if (hasBin) {
         try {

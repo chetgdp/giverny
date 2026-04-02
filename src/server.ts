@@ -36,11 +36,30 @@ import {
 const PORT = parseInt(process.env.PORT || "8741");
 
 // Session management ------------------------------------------------------- /
-// reuse Claude Code sessions across turns
+// reuse Claude Code sessions across turns, evict after TTL
+
+const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_SESSIONS = 100;
 
 interface Session {
     backendSessionId: string;
     sentMsgCount: number;
+    accessedAt: number;
+}
+
+function evictSessions(map: Map<string, Session>) {
+    const now = Date.now();
+    // Evict expired entries
+    for (const [key, s] of map) {
+        if (now - s.accessedAt > SESSION_TTL_MS) map.delete(key);
+    }
+    // If still over cap, drop oldest
+    if (map.size > MAX_SESSIONS) {
+        const sorted = [...map.entries()].sort((a, b) => a[1].accessedAt - b[1].accessedAt);
+        for (let i = 0; i < sorted.length - MAX_SESSIONS; i++) {
+            map.delete(sorted[i][0]);
+        }
+    }
 }
 
 const sessions = new Map<string, Session>();
@@ -66,6 +85,7 @@ async function handleChatCompletions(body: any): Promise<Response> {
     const nonSystem = messages.filter((m: any) => m.role !== "system");
     const key = sessionKey(messages, tools);
     const session = sessions.get(key);
+    if (session) session.accessedAt = Date.now();
 
     let prompt: string;
     let resumeSessionId: string | undefined;
@@ -142,9 +162,11 @@ async function handleChatCompletions(body: any): Promise<Response> {
         parsed = parseTextToolCalls(result.text);
         // Update session for text-only responses
         if (result.sessionId) {
+            evictSessions(sessions);
             sessions.set(key, {
                 backendSessionId: result.sessionId,
                 sentMsgCount: nonSystem.length,
+                accessedAt: Date.now(),
             });
         }
     }
@@ -194,6 +216,7 @@ async function handleResponses(body: any): Promise<Response> {
     if (previous_response_id) {
         const session = responseSessions.get(previous_response_id);
         if (session) {
+            session.accessedAt = Date.now();
             prompt = buildPrompt(messages);
             resumeSessionId = session.backendSessionId;
             isResume = true;
@@ -256,9 +279,11 @@ async function handleResponses(body: any): Promise<Response> {
 
     // Store session for future previous_response_id lookups (text-only responses)
     if (result.sessionId && result.toolUseBlocks.length === 0) {
+        evictSessions(responseSessions);
         responseSessions.set(responseId, {
             backendSessionId: result.sessionId,
             sentMsgCount: nonSystem.length,
+            accessedAt: Date.now(),
         });
     }
 

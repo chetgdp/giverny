@@ -1,8 +1,6 @@
 // help.tssingle source of truth for giverny help output
 
-const BOLD = "\x1b[1m";
-const DIM = "\x1b[2m";
-const RESET = "\x1b[0m";
+import { BOLD, DIM, RESET } from "./shell-utils";
 
 export function printHelp(prefix = ",") {
     const shell = (process.env.SHELL || "").split("/").pop() || "unknown";

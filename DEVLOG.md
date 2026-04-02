@@ -59,9 +59,12 @@ to do anything in the shell. This inspired an interaction with claude about clau
 >"...yeah that works too."  
 
 ##
-
 I have bridged the gap between shell and llm. The ease of composability means that humans can use it without much fuss. But imagine more elaborate orchestrator agnt frameworks with big contexts spawning off giverny infused shell programs. Cronjobs with intelligence built into them. The frameworks like openclaw and hermes agent, where they fail today is the mass amount of tokens they consume, you have to pay like the cost of lunch every day for normal use. These frameworks are better served by distributed inference, slower but way cheaper. The tasks you need it to complete are async, they can take their time.
 
 ##
-
 you could have giverny shell mode hit the opencode server client and use their agent harness the same way we use claude code. just make system prompt empty. but then we can also make opencode hit the giverny server that uses claude code. and bybapp the whole anti claude oauth thing that happened. wow. the bridge idea is just exactly what giverny is. 
+
+## refactoring
+So far I have barely written any lines of this project over the course of 10 days of building it with claude code. not surprising to me, given that typescript(it's just js) is quite easy to just shit out. also I have a knack for holding the leash, I can spot stupid shit before it happens and have done so on this project. So far its under 5500 lines of source code. I've maintained the architectural design decisions. Time to see if it paid off. 
+
+Now time to go into the mines and actually read it. A step that is quite rare

@@ -4,12 +4,10 @@
 
 import { join } from "path";
 import { mkdirSync, readdirSync, statSync } from "fs";
-import { CONFIG_DEFAULTS, type ShellConfig } from "./config";
+import { CONFIG_DEFAULTS, HOME, GLOBAL_DIR, type ShellConfig } from "./config";
 import { loadJSON, saveJSON } from "./shell-utils";
 
 // File paths ---------------------------------------------------------------- /
-
-const GLOBAL_DIR = join(process.env.HOME || "~", ".giverny");
 export const GLOBAL_CONFIG_FILE = join(GLOBAL_DIR, "config.json");
 export const GIVERNY_DIR = join(process.cwd(), ".giverny");
 const APPROVED_FILE = join(GIVERNY_DIR, "approved");
@@ -164,7 +162,6 @@ export async function saveApproved(tools: Set<string>) {
 // Reads directly from Claude Code's session storage (~/.claude/projects/)
 // so giverny and claude code share the same session pool.
 
-const HOME = process.env.HOME || "~";
 const CLAUDE_PROJECTS_DIR = join(HOME, ".claude", "projects");
 
 // Claude Code encodes cwd by replacing /, _, and . with -

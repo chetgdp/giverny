@@ -1,12 +1,13 @@
 #!/usr/bin/env bun
 // run.ts
 /*
-* Givernyentry point.
+* Giverny entry point.
 * Routes --server, --setup, --help to the appropriate module.
 * Bare `giverny` launches the interactive shell program.
 */
 
-// onlt the first arg is a command flag for now, until we add command chains
+// only the first arg is a command flag
+// but we did add command chaining so idk
 const args = process.argv.slice(2);
 const cmd = args[0]; 
 
