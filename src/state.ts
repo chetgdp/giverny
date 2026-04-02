@@ -78,6 +78,19 @@ export const saveConfig = async (cfg: ShellConfig, local: boolean) => {
     }
 };
 
+// Remove keys from config (for resetting to defaults)
+export const deleteConfigKeys = async (keys: (keyof ShellConfig)[], local: boolean) => {
+    if (local) {
+        const existing = await loadJSON<ShellConfig>(CONFIG_FILE, {});
+        for (const k of keys) delete existing[k];
+        await saveLocalConfig(existing);
+    } else {
+        const existing = await loadJSON<ShellConfig>(GLOBAL_CONFIG_FILE, {});
+        for (const k of keys) delete existing[k];
+        await saveGlobalConfig(existing);
+    }
+};
+
 // Usage tracking ----------------------------------------------------------- /
 // Session-scoped token usage. Resets on /new or /clear.
 

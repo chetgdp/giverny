@@ -63,7 +63,9 @@ export function buildClaudeArgs(opts: GenerateOptions): string[] {
 
     args.push("--effort", extra.effort || DEFAULT_EFFORT);
 
-    if (opts.sessionId) {
+    // Only pass UUID session IDs — claude -p --resume requires UUID format.
+    // Non-UUID IDs (e.g. conv-* from completions backend) are silently dropped.
+    if (opts.sessionId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(opts.sessionId)) {
         args.push("--resume", opts.sessionId);
     }
 
@@ -139,7 +141,7 @@ function parseNdjsonLine(line: string): BridgeEvent | null {
                 type: "result",
                 sessionId: event.session_id || null,
                 isError: !!event.is_error,
-                result: event.result || "",
+                result: event.result || (event.errors?.length ? event.errors.join("; ") : ""),
                 numTurns: event.num_turns || 1,
                 durationMs: event.duration_api_ms || null,
                 usage,

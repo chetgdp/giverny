@@ -1,6 +1,7 @@
 ## todo next
 - [x] v1/responses support
-- [] fix base system prompt, no prompt and set prompt and shell agent mode
+- [x] fix base system prompt, no prompt and set prompt and shell agent mode
+- [] chaining giverny commands ex ? /keep /new
 - [] pick config for giverny -s other than claude code?
 - [] general refactor
 
@@ -13,20 +14,19 @@
     - [x] /tableflip command
     - [] show other animations with commands?
     - [x] time in m and s
+    - [] option to disable spinner
 - [] clawd svg
 - [] bridge svg logo?
 
 ## scope 
-- v0 use giverny as a first class cli ux for the claude code agent harness
-- v1 point giverny at any LLM completions api to use any model
+- [x] v0 use giverny as a first class cli ux for the claude code agent harness
+- [] v1 point giverny at any LLM completions api to use any model
 - v2 rust rewrite | shell RL pico model
 
 ## potential features
 
 ### easy
 - install to selected shells, how to detect installed shells?
-- ~~tok/s? backend agnostic?~~
-- [x] quiet should have tool calls listed?
 
 ### medium
 - support other shells? (nushell, powershell...)
@@ -61,6 +61,7 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
 - escape codes appearing inside nvim `:!` mode
 - terminal bench harbor benchmark
 - [] context window over large sessions?
+- ~~tok/s? backend agnostic?~~
 
 
 ----
@@ -83,8 +84,6 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
     - [x] cleanup help
     - [x] state toggle, /new vs /resume
     - [x] last message copy
-    - [] chaining giverny commands ex ? /keep /new
-    - [] anything else?
 - [x] show if hanging or thinking or tool call
 - [x] clean up shell mode step 1 (naive refactor)
 - [x] ~ home root config, default/global/local
@@ -114,3 +113,4 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
 - [x] llama-server should not be called that, the feature can hit any openai api? completions api + api_key
 - [x] actual inc distributed inference backend
 - [x] split config into backend sub parts, actual, generic completions
+- [x] quiet should have tool calls listed?

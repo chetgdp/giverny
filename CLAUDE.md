@@ -6,10 +6,18 @@ Wraps `claude -p` into two interfaces: a composable shell program (`?`/`,` prefi
 
 Bun project. `run.ts` entry point, installed globally as `giverny`.
 
-Core is `src/bridge.ts`, wraps `claude -p --output-format stream-json --verbose`, parses NDJSON, exposes streaming + collected interfaces. Everything builds on bridge.
+Multi-backend design: `src/backend.ts` defines the Backend interface, `src/bridge-loop.ts` (Bridge) wraps any backend into a consumer-friendly API with agent loop support. Shell and server talk to Bridge, never to backends directly.
 
 - **Shell** (`giverny`) - default. Uses Claude Code's native tools. Composable: detects pipes on stdin/stdout. Piped stdin is prepended to the prompt, piped stdout gets clean text (UI chrome routes to stderr). `git diff | @ summarize | wl-copy` works.
-- **Server** (`giverny -s`) - OpenAI `/v1/chat/completions` endpoint. Disables Claude Code tools, injects client definitions, converts to/from OpenAI format.
+- **Server** (`giverny -s`) - OpenAI `/v1/chat/completions` and `/v1/responses` endpoints. Disables Claude Code tools, injects client definitions, converts to/from OpenAI format.
+
+### Backends
+
+- `claude-code` (default) — wraps `claude -p`, agentLoop=true, sessions via Claude Code's native storage
+- `completions` — OpenAI-compatible `/v1/chat/completions` API, agentLoop=false (Bridge runs tool loop)
+- `responses` — OpenAI `/v1/responses` API, agentLoop=false
+
+Non-agentLoop backends use `src/tools.ts` for tool definitions and execution (single `exec` tool). System prompt is configurable: `default` (built-in shell agent), `none`, or custom string via `/prompt`.
 
 ## claude -p reference
 
@@ -24,13 +32,23 @@ Core is `src/bridge.ts`, wraps `claude -p --output-format stream-json --verbose`
 ## Key Files
 
 - `run.ts` - entry point, routes --server/--setup/--help
-- `src/bridge.ts` - core `claude -p` wrapper
+- `src/backend.ts` - Backend interface contract (any LLM backend implements this)
+- `src/bridge-loop.ts` - Bridge class, agent loop dispatcher (shell/server talk to this)
+- `src/bridge.ts` - claude-code backend (`claude -p` wrapper, NDJSON parser)
+- `src/completions.ts` - completions backend (OpenAI chat completions API)
+- `src/responses.ts` - responses backend (OpenAI responses API)
+- `src/tools.ts` - tool definitions + executor for non-agentLoop backends (single `exec` tool)
 - `src/shell.ts` - shell mode (interactive + piped)
 - `src/shell-utils.ts` - pure shell utilities (permissions, tool summaries, kaomoji)
+- `src/commands.ts` - slash command handler (/model, /effort, /prompt, /resume, etc.)
+- `src/state.ts` - config cascade, session persistence, usage tracking, conversations
 - `src/server.ts` - HTTP server (Bun.serve)
-- `src/protocol.ts` - OpenAI protocol conversion (messages, tool calls, SSE)
-- `src/config.ts` - shared config (timeout, effort, model, logging)
+- `src/protocol.ts` - OpenAI chat completions protocol conversion
+- `src/responses-protocol.ts` - OpenAI responses protocol conversion
+- `src/config.ts` - shared config types, defaults, logging
+- `src/spinner.ts` - terminal spinner for shell mode
 - `src/setup.ts` - installs shell aliases
+- `src/help.ts` - help text
 
 ## Why not just `claude -p`?
 

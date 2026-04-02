@@ -17,7 +17,7 @@ import type { BridgeEvent, RunControl } from "./backend";
 import { Bridge } from "./bridge-loop";
 import { loadJSON, needsPermission, isDangerousCommand, summarizeTool, promptPermission, DIM, RED, ORANGE, SEA_GREEN, RESET, INV, PIPED, ui } from "./shell-utils";
 import { TOOL_SYSTEM_PROMPT } from "./tools";
-import { loadConfig, loadSession, saveSession, clearSession, loadUsage, saveUsage, loadApproved, saveApproved, GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE } from "./state";
+import { loadConfig, loadSession, saveSession, clearSession, loadUsage, saveUsage, loadApproved, saveApproved, discoverSessions, discoverConversations, GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE } from "./state";
 import { createSpinner } from "./spinner";
 import { handleSlashCommand } from "./commands";
 export { handleSlashCommand };
@@ -33,6 +33,7 @@ export interface RunShellOpts {
     perms: string;
     tools: string;
     output: string;
+    systemPrompt?: string;
     url?: string;
     apiKey?: string;
     clusterId?: string;
@@ -197,8 +198,11 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
     // deny in -p mode) and handle permissions ourselves via pause/resume.
     // Non-agentLoop backends (completions etc.) need a system prompt —
     // agentLoop backends (claude -p) supply their own.
-    //const systemPrompt = bridge.info.capabilities.agentLoop ? undefined : "";
-    const systemPrompt = bridge.info.capabilities.agentLoop ? undefined : TOOL_SYSTEM_PROMPT;
+    // Config: "default" → TOOL_SYSTEM_PROMPT, "none" → no prompt, anything else → custom.
+    const systemPrompt = bridge.info.capabilities.agentLoop ? undefined
+        : opts.systemPrompt === "none" ? undefined
+        : opts.systemPrompt && opts.systemPrompt !== "default" ? opts.systemPrompt
+        : TOOL_SYSTEM_PROMPT;
 
     const bridgeResult = await bridge.run(
         {
@@ -280,11 +284,31 @@ export async function main() {
     const perms = cfg.perms;
     const tools = cfg.tools;
     const output = cfg.output;
-    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, url: cfg.url, apiKey: cfg.apiKey, clusterId: cfg.clusterId, bridge };
+    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, systemPrompt: cfg.systemPrompt, url: cfg.url, apiKey: cfg.apiKey, clusterId: cfg.clusterId, bridge };
 
-    // Session init
+    // Session init — detect backend/session mismatch from backend switches.
+    // claude-code needs UUID sessions; completions/responses use conv-* IDs.
+    const isClaudeBackend = (cfg.backend || "claude-code") === "claude-code";
+    const isUUID = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
     const isFresh = cfg.session === "fresh";
     let sessionId = isFresh ? null : await loadSession();
+    if (sessionId && !isFresh) {
+        const mismatch = isClaudeBackend ? !isUUID(sessionId) : isUUID(sessionId);
+        if (mismatch) {
+            // Auto-recover: find the most recent session for the current backend
+            const discovered = isClaudeBackend
+                ? await discoverSessions(1)
+                : await discoverConversations(1);
+            const best = discovered.sessions[0];
+            if (best) {
+                sessionId = best.id;
+                await saveSession(best.id);
+            } else {
+                sessionId = null;
+                await clearSession();
+            }
+        }
+    }
     let approvedTools = await loadApproved();
 
     let result: ShellResult;

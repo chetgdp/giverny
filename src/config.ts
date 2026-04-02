@@ -30,6 +30,7 @@ export interface ShellConfig {
     tools?: string;
     output?: string;
     session?: string;
+    systemPrompt?: string;  // "default" | "none" | custom string (non-agentLoop backends only)
     // Backend-specific (resolved at load time from sub-objects)
     url?: string;
     apiKey?: string;
@@ -49,6 +50,7 @@ export const CONFIG_DEFAULTS: Required<Omit<ShellConfig, "backends" | "url" | "a
     tools: "all",
     output: "normal",
     session: "keep",
+    systemPrompt: "default",
 };
 
 

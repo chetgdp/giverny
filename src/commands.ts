@@ -5,7 +5,7 @@ import { join } from "path";
 import { CONFIG_DEFAULTS, type ShellConfig } from "./config";
 import { normalizePerms, KAOMOJI, DIM, RED, BOLD, RESET } from "./shell-utils";
 import {
-    loadConfigWithSources, saveConfig, loadSession, loadUsage,
+    loadConfigWithSources, saveConfig, deleteConfigKeys, loadSession, loadUsage,
     loadSessions, saveSession, clearSession, loadApproved,
     discoverSessions, discoverConversations,
     GIVERNY_DIR, USAGE_FILE, TRANSCRIPT_FILE,
@@ -84,6 +84,10 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             console.log(`  tools:   ${cfg.tools}${sourceTag(sources.tools)}`);
             console.log(`  output:  ${cfg.output}${sourceTag(sources.output)}`);
             console.log(`  session: ${cfg.session}${sourceTag(sources.session)}`);
+            if (cfg.systemPrompt && cfg.systemPrompt !== "default") {
+                const display = cfg.systemPrompt.length > 40 ? cfg.systemPrompt.slice(0, 40) + "…" : cfg.systemPrompt;
+                console.log(`  prompt:  ${display}${sourceTag(sources.systemPrompt)}`);
+            }
             if (approvedTools.size > 0) {
                 console.log(`  approved: ${[...approvedTools].join(", ")}`);
             }
@@ -310,6 +314,31 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             await saveConfig({ session: s }, isLocal);
             const where = isLocal ? "local" : "global";
             console.log(`session: ${s} ${DIM}(${where})${RESET}`);
+            return true;
+        }
+        case "prompt": {
+            if (!arg) {
+                const val = cfg.systemPrompt || CONFIG_DEFAULTS.systemPrompt;
+                console.log(`prompt: ${val}${sourceTag(sources.systemPrompt)}`);
+                console.log(`  default  built-in tool agent prompt`);
+                console.log(`  none     no system prompt`);
+                console.log(`  <text>   custom system prompt`);
+                console.log(`  ${DIM}only applies to completions/responses backends${RESET}`);
+                console.log(`  /prompt <value> [--local]${RESET}`);
+                return true;
+            }
+            const lower = arg.toLowerCase();
+            if (lower === "default" || lower === "reset") {
+                await deleteConfigKeys(["systemPrompt"], isLocal);
+                const where = isLocal ? "local" : "global";
+                console.log(`prompt: default ${DIM}(${where} key removed)${RESET}`);
+                return true;
+            }
+            const val = lower === "none" ? "none" : arg;
+            await saveConfig({ systemPrompt: val }, isLocal);
+            const where = isLocal ? "local" : "global";
+            const display = val.length > 60 ? val.slice(0, 60) + "…" : val;
+            console.log(`prompt: ${display} ${DIM}(${where})${RESET}`);
             return true;
         }
         case "new":
