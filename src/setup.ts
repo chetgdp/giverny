@@ -1,7 +1,10 @@
 // setup.ts
 /*
-* Giverny setupshell aliases, claude check, global config.
-* Run with `giverny --setup`.
+* Giverny setup — shell aliases, claude check, global config.
+* Run with `giverny --setup [backend|prefs]`.
+*   --setup          full config (both flows)
+*   --setup backend  backend, model, effort
+*   --setup prefs    prefix, session, perms, output
 */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync, readSync, closeSync, unlinkSync } from "fs";
@@ -10,6 +13,11 @@ import { execSync } from "child_process";
 import { VALID_PREFIXES, CONFIG_DEFAULTS, type ShellConfig } from "./config";
 
 const auto = process.argv.includes("auto");
+const setupArg = process.argv.find(a => a === "backend" || a === "prefs");
+const mode = setupArg || "full";
+const runBackend = mode === "full" || mode === "backend";
+const runPrefs = mode === "full" || mode === "prefs";
+
 const HOME = process.env.HOME || "~";
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -120,35 +128,37 @@ if (existsSync(GLOBAL_CONFIG)) {
 }
 
 // ── Claude CLI check ─────────────────────────────────────────────────────── //
-// Only check if current config uses claude-code (or no config yet)
+// Only check if backend flow is running and current config uses claude-code
 
-const currentBackend = config.backend || "claude-code";
-if (currentBackend === "claude-code") {
-    console.log(`\n${BOLD}claude${RESET}`);
+if (runBackend) {
+    const currentBackend = config.backend || "claude-code";
+    if (currentBackend === "claude-code") {
+        console.log(`\n${BOLD}claude${RESET}`);
 
-    let claudeFound = false;
-    try {
-        const version = execSync("claude --version", { stdio: ["pipe", "pipe", "pipe"] }).toString().trim();
-        ok(`claude ${version}`);
-        claudeFound = true;
-    } catch {
-        warn("claude CLI not found");
-    }
-
-    if (claudeFound) {
+        let claudeFound = false;
         try {
-            const creds = JSON.parse(readFileSync(join(HOME, ".claude/.credentials.json"), "utf-8"));
-            const oauth = creds.claudeAiOauth || {};
-            const sub = oauth.subscriptionType || "unknown";
-            const tier = oauth.rateLimitTier || "";
-            ok(`authenticated: ${sub}${tier ? ` (${tier})` : ""}`);
+            const version = execSync("claude --version", { stdio: ["pipe", "pipe", "pipe"] }).toString().trim();
+            ok(`claude ${version}`);
+            claudeFound = true;
         } catch {
-            warn("not authenticated (run 'claude' to log in)");
+            warn("claude CLI not found");
         }
-    }
 
-    if (!claudeFound) {
-        console.log(`  ${DIM}needed for claude-code backend: https://docs.anthropic.com/en/docs/claude-code${RESET}`);
+        if (claudeFound) {
+            try {
+                const creds = JSON.parse(readFileSync(join(HOME, ".claude/.credentials.json"), "utf-8"));
+                const oauth = creds.claudeAiOauth || {};
+                const sub = oauth.subscriptionType || "unknown";
+                const tier = oauth.rateLimitTier || "";
+                ok(`authenticated: ${sub}${tier ? ` (${tier})` : ""}`);
+            } catch {
+                warn("not authenticated (run 'claude' to log in)");
+            }
+        }
+
+        if (!claudeFound) {
+            console.log(`  ${DIM}needed for claude-code backend: https://docs.anthropic.com/en/docs/claude-code${RESET}`);
+        }
     }
 }
 
@@ -165,9 +175,10 @@ if (auto) {
     installAliases(config.prefix || DEFAULTS.prefix);
 } else {
 
-console.log(`\n${BOLD}global config${RESET} ${DIM}(~/.giverny/config.json)${RESET}`);
+const headerLabel = mode === "backend" ? "backend config" : mode === "prefs" ? "preferences" : "global config";
+console.log(`\n${BOLD}${headerLabel}${RESET} ${DIM}(~/.giverny/config.json)${RESET}`);
 
-// Interactive promptsarrow key / j/k select, number to jump, enter to confirm
+// Interactive prompts — arrow key / j/k select, number to jump, enter to confirm
 function prompt(label: string, options: { value: string; desc: string }[], current?: string): string {
     const hardDefault = DEFAULTS[label] || options[0].value;
     const defaultVal = current || hardDefault;
@@ -214,7 +225,7 @@ function prompt(label: string, options: { value: string; desc: string }[], curre
         while (true) {
             const n = readSync(fd, buf, 0, 3);
 
-            // Ctrl+C or Escapeabort
+            // Ctrl+C or Escape — abort
             if (buf[0] === 0x03 || (n === 1 && buf[0] === 0x1b)) {
                 closeSync(fd);
                 execSync("stty sane", { stdio: "inherit" });
@@ -236,7 +247,7 @@ function prompt(label: string, options: { value: string; desc: string }[], curre
                 }
             }
 
-            // Number keysselect and confirm immediately
+            // Number keys — select and confirm immediately
             if (n === 1 && buf[0] >= 0x31 && buf[0] <= 0x39) {
                 const num = buf[0] - 0x30; // 1-9
                 if (num >= 1 && num <= options.length) {
@@ -264,24 +275,35 @@ function prompt(label: string, options: { value: string; desc: string }[], curre
     return options[selected].value;
 }
 
-const backend = prompt("backend", [
-    { value: "claude-code", desc: "claude CLI (requires claude -p)" },
-    { value: "completions", desc: "/v1/chat/completions (llama.cpp, ollama, vllm, etc.)" },
-    { value: "responses", desc: "/v1/responses streaming (OpenAI, OpenRouter, etc.)" },
-    { value: "actual.inc", desc: "Actual Computer Distributed Inference Network" },
-], config.backend);
-
-// Read backend-specific settings from sub-objects (fall back to legacy flat fields)
+// Read backend sub-configs from existing config
 const backends = config.backends || {};
 const actualCfg = backends["actual.inc"] || {};
 const compCfg = backends["completions"] || {};
 const respCfg = backends["responses"] || {};
 
+// All config variables — initialized from existing config, overridden by active flow
+let backend = config.backend || DEFAULTS.backend;
 let url = "";
 let apiKey = "";
 let clusterId = "";
 let port = "";
 let model = config.model || DEFAULTS.model;
+let prefix = config.prefix || DEFAULTS.prefix;
+let effort = config.effort || DEFAULTS.effort;
+let session = config.session || DEFAULTS.session;
+let perms = config.perms || DEFAULTS.perms;
+let output = config.output || DEFAULTS.output;
+
+// ── Backend flow ──────────────────────────────────────────────────────────── //
+
+if (runBackend) {
+
+backend = prompt("backend", [
+    { value: "claude-code", desc: "claude CLI (requires claude -p)" },
+    { value: "completions", desc: "/v1/chat/completions (llama.cpp, ollama, vllm, etc.)" },
+    { value: "responses", desc: "/v1/responses streaming (OpenAI, OpenRouter, etc.)" },
+    { value: "actual.inc", desc: "Actual Computer Distributed Inference Network" },
+], config.backend);
 
 if (backend === "actual.inc") {
     // Protocol choice — completions or responses
@@ -474,25 +496,7 @@ if (backend === "actual.inc") {
         });
     });
     if (respKeyInput) apiKey = respKeyInput;
-}
-
-const prefix = prompt("prefix", [
-    { value: ",", desc: "comma" },
-    { value: "?", desc: "question mark" },
-    { value: "@", desc: "at sign" },
-    { value: "+", desc: "plus" },
-    { value: "_", desc: "underscore" },
-], config.prefix);
-
-// Claude-specific options
-let effort = config.effort || DEFAULTS.effort;
-let session = config.session || DEFAULTS.session;
-
-if (backend !== "actual.inc") {
-    model = config.model || DEFAULTS.model;
-}
-
-if (backend === "claude-code") {
+} else if (backend === "claude-code") {
     model = prompt("model", [
         { value: "opus", desc: "1M context, supports max effort" },
         { value: "sonnet", desc: "fast + capable, 200k context" },
@@ -505,34 +509,54 @@ if (backend === "claude-code") {
         { value: "high", desc: "thorough, considers edge cases" },
         ...(model === "opus" ? [{ value: "max", desc: "maximum thinking (opus only)" }] : []),
     ], config.effort);
-
-    session = prompt("session", [
-        { value: "keep", desc: "resume conversation across queries" },
-        { value: "fresh", desc: "each query starts with empty context" },
-    ], config.session);
 }
 
-const perms = prompt("perms", [
+} // end backend flow
+
+// ── Preferences flow ──────────────────────────────────────────────────────── //
+
+if (runPrefs) {
+
+prefix = prompt("prefix", [
+    { value: ",", desc: "comma" },
+    { value: "?", desc: "question mark" },
+    { value: "@", desc: "at sign" },
+    { value: "+", desc: "plus" },
+    { value: "_", desc: "underscore" },
+], config.prefix);
+
+session = prompt("session", [
+    { value: "keep", desc: "resume conversation across queries" },
+    { value: "fresh", desc: "each query starts with empty context" },
+], config.session);
+
+perms = prompt("perms", [
     { value: "ask", desc: "prompt before dangerous tools" },
     { value: "confirm", desc: "prompt before every tool call" },
     { value: "auto", desc: "skip all permission prompts" },
     { value: "plan", desc: "read-only, no writes or execution" },
 ], config.perms);
 
-const output = prompt("output", [
+output = prompt("output", [
     { value: "quiet", desc: "spinner only, no tool output" },
     { value: "normal", desc: "tool names + truncated output" },
     { value: "verbose", desc: "full tool output" },
 ], config.output);
 
+} // end prefs flow
+
+// ── Save ──────────────────────────────────────────────────────────────────── //
+
 // Merge backend-specific fields into sub-objects, preserving other backends' settings
 const updatedBackends = { ...backends };
-if (backend === "actual.inc") {
-    updatedBackends["actual.inc"] = { url, apiKey, clusterId, port: port || undefined, protocol: (actualCfg as any)._protocol || "completions" };
-} else if (backend === "completions") {
-    updatedBackends["completions"] = { url, apiKey: apiKey || undefined };
-} else if (backend === "responses") {
-    updatedBackends["responses"] = { url, apiKey: apiKey || undefined };
+if (runBackend) {
+    if (backend === "actual.inc") {
+        updatedBackends["actual.inc"] = { url, apiKey, clusterId, port: port || undefined, protocol: (actualCfg as any)._protocol || "completions" };
+    } else if (backend === "completions") {
+        updatedBackends["completions"] = { url, apiKey: apiKey || undefined };
+    } else if (backend === "responses") {
+        updatedBackends["responses"] = { url, apiKey: apiKey || undefined };
+    }
 }
 
 config = { prefix, backend, model, effort, perms, output, session, backends: updatedBackends };
@@ -540,12 +564,21 @@ config = { prefix, backend, model, effort, perms, output, session, backends: upd
 mkdirSync(GLOBAL_DIR, { recursive: true });
 writeFileSync(GLOBAL_CONFIG, JSON.stringify(config, null, 2) + "\n");
 
-installAliases(prefix);
+if (runPrefs) {
+    installAliases(prefix);
+}
 
 console.log("");
 ok(`saved to ~/.giverny/config.json`);
 console.log(`${DIM}${JSON.stringify(config, null, 2)}${RESET}`);
-console.log(`\n${DIM}change anytime with /model, /effort, /perms, /output, /session${RESET}`);
-console.log(`${DIM}override per-directory with --local${RESET}\n`);
+
+if (mode === "backend") {
+    console.log(`\n${DIM}change anytime with /model, /effort, /backend${RESET}\n`);
+} else if (mode === "prefs") {
+    console.log(`\n${DIM}change anytime with /session, /perms, /output${RESET}\n`);
+} else {
+    console.log(`\n${DIM}change anytime with /model, /effort, /perms, /output, /session${RESET}`);
+    console.log(`${DIM}override per-directory with --local${RESET}\n`);
+}
 
 } // end interactive

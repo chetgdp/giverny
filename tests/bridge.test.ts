@@ -47,9 +47,15 @@ describe("buildClaudeArgs", () => {
         expect(args).not.toContain("--permission-mode");
     });
 
-    it("passes --resume when sessionId is set", () => {
+    it("passes --resume when sessionId is a UUID", () => {
+        const uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+        const args = buildClaudeArgs({ ...minimal, sessionId: uuid });
+        expect(args[args.indexOf("--resume") + 1]).toBe(uuid);
+    });
+
+    it("omits --resume when sessionId is not a UUID", () => {
         const args = buildClaudeArgs({ ...minimal, sessionId: "abc-123" });
-        expect(args[args.indexOf("--resume") + 1]).toBe("abc-123");
+        expect(args).not.toContain("--resume");
     });
 
     it("passes --system-prompt when set", () => {
@@ -81,7 +87,7 @@ describe("buildClaudeArgs", () => {
         const args = buildClaudeArgs({
             prompt: "do stuff",
             model: "sonnet",
-            sessionId: "sess-1",
+            sessionId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
             systemPrompt: "you are helpful",
             options: {
                 effort: "high",
@@ -92,7 +98,7 @@ describe("buildClaudeArgs", () => {
         expect(args[args.indexOf("--model") + 1]).toBe("sonnet");
         expect(args[args.indexOf("--effort") + 1]).toBe("high");
         expect(args[args.indexOf("--permission-mode") + 1]).toBe("default");
-        expect(args[args.indexOf("--resume") + 1]).toBe("sess-1");
+        expect(args[args.indexOf("--resume") + 1]).toBe("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
         expect(args[args.indexOf("--system-prompt") + 1]).toBe("you are helpful");
         expect(args[args.indexOf("--tools") + 1]).toBe("Read,Edit");
     });

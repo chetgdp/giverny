@@ -16,7 +16,9 @@ export function printHelp(prefix = ",") {
     console.log(`${BOLD}Modes${RESET}`);
     console.log("  giverny [prompt]          Interactive shell (default)");
     console.log("  giverny --server, -s      Start the OpenAI-compatible server");
-    console.log("  giverny --setup           Setup shell aliases + config (interactive)");
+    console.log("  giverny --setup           Setup all config (interactive)");
+    console.log("  giverny --setup backend   Backend, model, effort");
+    console.log("  giverny --setup prefs     Prefix, session, perms, output");
     console.log("  giverny --setup auto      Setup with defaults (non-interactive)");
     console.log("  giverny --uninstall       Remove giverny config");
     console.log("  giverny --uninstall --purge");

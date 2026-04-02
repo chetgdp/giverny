@@ -2,9 +2,13 @@
 - [x] v1/responses support
 - [x] fix base system prompt, no prompt and set prompt and shell agent mode
 - [x] chaining giverny commands ex ? /prompt none /keep hello
-- [] pick config for giverny -s other than claude code?
-- [] giverny controls setup vs inference backend setup (two flows, one combined)
+- [] still hanging after some toolcalls
+- [] column length issue with spinner and time
+    - [] iSH repeating spinner on each newline (column width too wide?)
+- [] escape codes appearing inside nvim `:!` mode
+- [] nushell
 - [] general refactor
+- [] terminal bench harbor benchmark [x] giverny controls setup vs inference backend setup (two flows, one combined)
 
 ## todo goodies
 - [x] kaomojis for ...thinking... (╯°益°)╯彡┻━┻
@@ -22,49 +26,37 @@
 ## scope 
 - [x] v0 use giverny as a first class cli ux for the claude code agent harness
 - [] v1 point giverny at any LLM completions api to use any model
-- v2 rust rewrite | shell RL pico model
+- v2 shell RL pico model | rust rewrite
 
-## potential features
+## upcoming features
 
-### easy
-- install to selected shells, how to detect installed shells?
+### v1.0+
+global sessions (tailscale) point to one ip where llm is hosted (llama-server mode). It keeps the session data local to itself (how anthropic does resume). But with the same session_id you can have a global session in the sense that you can invoke the same session from multiple PCs. This means multi user sessions and different computer cntexts across one singular session.
 
-### medium
-- support other shells? (nushell, powershell...)
-- markdown rendering (tables at the very least)
-
-### hard
-- mermaid graphs render in cli? hardware enabled image?
-- smart permissions mode (llm sets it own perms (dangerous.. but less so than full auto?))
-
-- [] non claude backend -> custom agent harness? (stripped down hermes?) 
-    - [x] medium qwen3.5-30b-a3b 
-    - [] small 7-14b
-    - [] tiny 1-3b
-    - [] nano 0.5b
-    - [] pico 50-300m apple neural engine accel? custom shell agent? (the data transfomration pipeline squeeze out the hardware to the max on m1 chip)
-the point is that we are testing this with claude but the real killer is a composable agentic shell program running on something like ANE and trained exactly
-
+- custom agent harness? (stripped down hermes?) 
 we have discovered that the agent harness is just the UNIX environment:
 - sh    (1977 - C) shell environment
 - perl  (1987 - C) text processing
 - curl  (1998 - C) networking
 for this environment using RL... (forgot what to say)
 
-global sessions (tailscale) point to one ip where llm is hosted (llama-server mode). It keeps the session data local to itself (how anthropic does resume). But with the same session_id you can have a global session in the sense that you can invoke the same session from multiple PCs. This means multi user sessions and different computer cntexts across one singular session.
+- smart permissions mode (llm sets it own perms (dangerous.. but less so than full auto?))
 
-## known issues
-- still hanging after some toolcalls
-- 
-- column length issue with spinner and time
-    - iSH repeating spinner on each newline (column width too wide?)
-- escape codes appearing inside nvim `:!` mode
-- [] context window over large sessions?
-- terminal bench harbor benchmark
+### proto v2
+- [] pico 50-300m apple neural engine accel? custom shell agent? (the data transfom#ration pipeline squeeze out the hardware to the max on m1 chip)
+the point is that we are testing this with claude but the real killer is a composable agentic shell program running on something like ANE and trained exactly
 
 ### pause
+- mermaid graphs render in cli? hardware enabled image? no good cli tool
+- support (Powershell... Windows...) (not happening on TS prototype build, have to use Rust to deal with cross compatability)
+- [] pick config for giverny -s other than claude code? (not the point)
+- [] context window over large sessions? (low % feature)
+
+- ~~install to selected shells, how to detect installed shells?~~
 - ~~tok/s? backend agnostic?~~
 - ~~writing to root /tmp/c when given ./tmp/c (haiku) (bandaid fix to base model behavior)~~
+
+## known issues
 
 
 ----
@@ -117,3 +109,9 @@ global sessions (tailscale) point to one ip where llm is hosted (llama-server mo
 - [x] actual inc distributed inference backend
 - [x] split config into backend sub parts, actual, generic completions
 - [x] quiet should have tool calls listed?
+- [x] markdown rendering (tables at the very least) (just | glow, done solved the userspace dissolution way)
+- [x] non claude backend    
+    - [x] medium qwen3.5-30b-a3b 
+    - [x] small 7-14b
+    - [x] tiny 1-3b
+    - [x] nano 0.5b
