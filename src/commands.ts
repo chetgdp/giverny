@@ -27,12 +27,68 @@ const sourceTag = (source: ConfigSource) =>
 
 const VALID_VERBOSE = ["quiet", "normal", "verbose"];
 
+// Command chaining: `/opus /high write a haiku` → set model, set effort, run prompt.
+// Each command consumes only its args and passes the rest along.
+
+// Commands that consume the rest of the line (no chaining after)
+const REST_COMMANDS = new Set(["prompt", "compact", "diff"]);
+
+// Commands that consume exactly one argument
+const ONE_ARG_COMMANDS = new Set(["model", "effort", "perms", "tools", "output", "session", "resume", "continue", "export"]);
+
+interface ParsedCommand {
+    name: string;
+    arg: string;
+    remainder: string;
+    isLocal: boolean;
+}
+
+function parseCommand(cmd: string): ParsedCommand {
+    const parts = cmd.slice(1).split(/\s+/).filter(Boolean);
+    const name = parts[0] || "";
+
+    if (REST_COMMANDS.has(name)) {
+        const isLocal = parts.includes("--local") || parts.includes("-l");
+        const argParts = parts.slice(1).filter(p => p !== "--local" && p !== "-l");
+        return { name, arg: argParts.join(" "), remainder: "", isLocal };
+    }
+
+    const arity = ONE_ARG_COMMANDS.has(name) ? 1 : 0;
+    let isLocal = false;
+    let consumed = 1; // command name
+    let argsConsumed = 0;
+    const argValues: string[] = [];
+
+    for (let i = 1; i < parts.length; i++) {
+        if (parts[i] === "--local" || parts[i] === "-l") {
+            isLocal = true;
+            consumed++;
+            continue;
+        }
+        if (argsConsumed >= arity) break;
+        if (parts[i].startsWith("/")) break; // next command boundary
+        argValues.push(parts[i]);
+        argsConsumed++;
+        consumed++;
+    }
+
+    return { name, arg: argValues.join(" "), remainder: parts.slice(consumed).join(" "), isLocal };
+}
+
+// Chain to remainder: recurse if more commands, return as prompt if text, or done
+async function chainRemainder(remainder: string, bridge: Bridge): Promise<string | true> {
+    if (!remainder) return true;
+    if (remainder.startsWith("/")) return handleSlashCommand(remainder, bridge);
+    return remainder;
+}
+
+// Build delegated command string for shortcuts (e.g. /opus → /model opus)
+function delegateCmd(canonical: string, name: string, isLocal: boolean, remainder: string): string {
+    return `/${canonical} ${name}${isLocal ? " --local" : ""}${remainder ? " " + remainder : ""}`;
+}
+
 export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<string | true> {
-    const parts = cmd.slice(1).split(/\s+/);
-    const name = parts[0];
-    const isLocal = parts.includes("--local") || parts.includes("-l");
-    const argParts = parts.slice(1).filter(p => p !== "--local" && p !== "-l");
-    const arg = argParts.join(" ");
+    const { name, arg, remainder, isLocal } = parseCommand(cmd);
     const { config: cfg, sources } = await loadConfigWithSources();
 
     switch (name) {
@@ -71,7 +127,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 console.log(`  session:      ${DIM}not supported by ${bridge.info.name}${RESET}`);
             }
 
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "config": {
             const approvedTools = await loadApproved();
@@ -107,13 +163,13 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     }
                 }
             }
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "backend": {
             console.log(`backend: ${bridge.info.name}`);
             console.log(`  models:  ${bridge.info.models.map(m => m.id).join(", ")}`);
             console.log(`  efforts: ${(bridge.info.efforts || []).join(", ")}`);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "context": {
             const usage = await loadUsage();
@@ -142,12 +198,12 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             if (sessionId) {
                 console.log(`  ${DIM}${sessionId}${RESET}`);
             }
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "opus":
         case "sonnet":
         case "haiku":
-            return handleSlashCommand(`/model ${name}`, bridge);
+            return handleSlashCommand(delegateCmd("model", name, isLocal, remainder), bridge);
         case "model": {
             if (!arg) {
                 console.log(`model: ${cfg.model}${sourceTag(sources.model)}`);
@@ -155,7 +211,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     console.log(`  ${mi.id.padEnd(8)} ${mi.description}`);
                 }
                 console.log(`  /model <name> [--local]${RESET}`);
-                return true;
+                return chainRemainder(remainder, bridge);
             }
             const m = arg.toLowerCase();
             const validModels = bridge.info.models.map(x => x.id);
@@ -175,7 +231,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 console.log(`model: ${m} ${DIM}(${where})${RESET}`);
             }
             await saveConfig(save, isLocal);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "effort": {
             const allEfforts = bridge.info.efforts || [];
@@ -198,7 +254,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     console.log(`  ${e.padEnd(9)}${desc}${note}`);
                 }
                 console.log(`  /effort <level> [--local]${RESET}`);
-                return true;
+                return chainRemainder(remainder, bridge);
             }
             const e = arg.toLowerCase();
             if (!allEfforts.includes(e)) {
@@ -212,18 +268,18 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             await saveConfig({ effort: e }, isLocal);
             const where = isLocal ? "local" : "global";
             console.log(`effort: ${e} ${DIM}(${where})${RESET}`);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "low":
         case "medium":
         case "high":
         case "max":
-            return handleSlashCommand(`/effort ${name}`, bridge);
+            return handleSlashCommand(delegateCmd("effort", name, isLocal, remainder), bridge);
         case "ask":
         case "confirm":
         case "auto":
         case "plan":
-            return handleSlashCommand(`/perms ${name}`, bridge);
+            return handleSlashCommand(delegateCmd("perms", name, isLocal, remainder), bridge);
         case "perms": {
             if (!arg) {
                 console.log(`perms: ${cfg.perms}${sourceTag(sources.perms)}`);
@@ -232,14 +288,14 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 console.log(`  auto     skip all permission prompts`);
                 console.log(`  plan     read-only, no writes or execution`);
                 console.log(`  /perms <mode> [--local]${RESET}`);
-                return true;
+                return chainRemainder(remainder, bridge);
             }
             const p = normalizePerms(arg);
             await saveConfig({ perms: p }, isLocal);
             const display = p;
             const where = isLocal ? "local" : "global";
             console.log(`perms: ${display} ${DIM}(${where})${RESET}`);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "tools": {
             if (!arg) {
@@ -264,18 +320,18 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     const color = on ? "" : DIM;
                     console.log(`  ${color}${mark} ${name.padEnd(12)} ${desc}${RESET}`);
                 }
-                return true;
+                return chainRemainder(remainder, bridge);
             }
             const toolsVal = arg === "all" ? undefined : arg;
             await saveConfig({ tools: toolsVal }, isLocal);
             const where = isLocal ? "local" : "global";
             console.log(`tools: ${arg} ${DIM}(${where})${RESET}`);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "quiet":
         case "normal":
         case "verbose":
-            return handleSlashCommand(`/output ${name}`, bridge);
+            return handleSlashCommand(delegateCmd("output", name, isLocal, remainder), bridge);
         case "output": {
             if (!arg) {
                 console.log(`output: ${cfg.output}${sourceTag(sources.output)}`);
@@ -283,7 +339,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 console.log(`  normal   tool names + truncated output`);
                 console.log(`  verbose  full tool output`);
                 console.log(`  /output <level> [--local]${RESET}`);
-                return true;
+                return chainRemainder(remainder, bridge);
             }
             const v = arg.toLowerCase();
             if (!VALID_VERBOSE.includes(v)) {
@@ -293,18 +349,18 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             await saveConfig({ output: v }, isLocal);
             const where = isLocal ? "local" : "global";
             console.log(`output: ${v} ${DIM}(${where})${RESET}`);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "fresh":
         case "keep":
-            return handleSlashCommand(`/session ${name}`, bridge);
+            return handleSlashCommand(delegateCmd("session", name, isLocal, remainder), bridge);
         case "session": {
             if (!arg) {
                 console.log(`session: ${cfg.session}${sourceTag(sources.session)}`);
                 console.log(`  keep     resume conversation across queries`);
                 console.log(`  fresh    each query starts with empty context`);
                 console.log(`  /session <mode> [--local]${RESET}`);
-                return true;
+                return chainRemainder(remainder, bridge);
             }
             const s = arg.toLowerCase();
             if (s !== "keep" && s !== "fresh") {
@@ -314,7 +370,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             await saveConfig({ session: s }, isLocal);
             const where = isLocal ? "local" : "global";
             console.log(`session: ${s} ${DIM}(${where})${RESET}`);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "prompt": {
             if (!arg) {
@@ -347,9 +403,9 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             const { unlink } = await import("fs/promises");
             try { await unlink(USAGE_FILE); } catch {}
             try { await unlink(TRANSCRIPT_FILE); } catch {}
-            if (arg) {
-                // `/new explain this` — clear session then run the prompt
-                return arg;
+            if (remainder) {
+                // `/new explain this` or `/new /opus write a haiku` — clear session then chain
+                return chainRemainder(remainder, bridge);
             }
             console.log("session cleared");
             return true;
@@ -409,7 +465,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     console.log(`\n${DIM}.giverny/conversations/${RESET}`);
                 }
                 console.log(`${DIM}/resume <number> or /resume <id>${RESET}`);
-                return true;
+                return chainRemainder(remainder, bridge);
             }
             // Resume by index or ID prefix
             let target: string | null = null;
@@ -426,7 +482,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             }
             await saveSession(target);
             console.log(`resumed: ${target.slice(0, 8)}…`);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "export": {
             let transcript: string;
@@ -442,7 +498,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             } else {
                 process.stdout.write(transcript);
             }
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "copy":
         case "last": {
@@ -461,7 +517,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             } else {
                 console.log(`${DIM}no response found${RESET}`);
             }
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "tableflip": {
             const { frames, interval } = KAOMOJI.tableflip;
@@ -470,18 +526,18 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 await new Promise(r => setTimeout(r, interval));
             }
             process.stdout.write("\n");
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "reset": {
             const { rm } = await import("fs/promises");
             try { await rm(GIVERNY_DIR, { recursive: true }); } catch {}
             console.log("config + session reset");
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         case "help": {
             const { printHelp } = await import("./help.ts");
             printHelp(cfg.prefix || CONFIG_DEFAULTS.prefix);
-            return true;
+            return chainRemainder(remainder, bridge);
         }
         default:
             return cmd;

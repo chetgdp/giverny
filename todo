@@ -1,8 +1,9 @@
 ## todo next
 - [x] v1/responses support
 - [x] fix base system prompt, no prompt and set prompt and shell agent mode
-- [] chaining giverny commands ex ? /keep /new
+- [x] chaining giverny commands ex ? /prompt none /keep hello
 - [] pick config for giverny -s other than claude code?
+- [] giverny controls setup vs inference backend setup (two flows, one combined)
 - [] general refactor
 
 ## todo goodies
@@ -53,15 +54,17 @@ for this environment using RL... (forgot what to say)
 global sessions (tailscale) point to one ip where llm is hosted (llama-server mode). It keeps the session data local to itself (how anthropic does resume). But with the same session_id you can have a global session in the sense that you can invoke the same session from multiple PCs. This means multi user sessions and different computer cntexts across one singular session.
 
 ## known issues
-- what is v0.1.0 actually going to be? (fix repo visibility)
-- writing to root /tmp/c when given ./tmp/c (haiku) (bandaid fix to base model behavior)
+- still hanging after some toolcalls
+- 
 - column length issue with spinner and time
     - iSH repeating spinner on each newline (column width too wide?)
-- no streaming from llama server
 - escape codes appearing inside nvim `:!` mode
-- terminal bench harbor benchmark
 - [] context window over large sessions?
+- terminal bench harbor benchmark
+
+### pause
 - ~~tok/s? backend agnostic?~~
+- ~~writing to root /tmp/c when given ./tmp/c (haiku) (bandaid fix to base model behavior)~~
 
 
 ----
