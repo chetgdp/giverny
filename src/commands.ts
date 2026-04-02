@@ -383,17 +383,28 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 console.log(`  /prompt <value> [--local]${RESET}`);
                 return true;
             }
-            const lower = arg.toLowerCase();
-            if (lower === "default" || lower === "reset") {
+            // Known single-word values can chain: `/prompt none /new hello`
+            // Custom free-text consumes the rest (no way to delimit it)
+            const words = arg.split(/\s+/);
+            const firstWord = words[0].toLowerCase();
+            const promptRest = words.slice(1).join(" ");
+            if (firstWord === "default" || firstWord === "reset") {
                 await deleteConfigKeys(["systemPrompt"], isLocal);
                 const where = isLocal ? "local" : "global";
                 console.log(`prompt: default ${DIM}(${where} key removed)${RESET}`);
+                if (promptRest) return chainRemainder(promptRest, bridge);
                 return true;
             }
-            const val = lower === "none" ? "none" : arg;
-            await saveConfig({ systemPrompt: val }, isLocal);
+            if (firstWord === "none") {
+                await saveConfig({ systemPrompt: "none" }, isLocal);
+                const where = isLocal ? "local" : "global";
+                console.log(`prompt: none ${DIM}(${where})${RESET}`);
+                if (promptRest) return chainRemainder(promptRest, bridge);
+                return true;
+            }
+            await saveConfig({ systemPrompt: arg }, isLocal);
             const where = isLocal ? "local" : "global";
-            const display = val.length > 60 ? val.slice(0, 60) + "…" : val;
+            const display = arg.length > 60 ? arg.slice(0, 60) + "…" : arg;
             console.log(`prompt: ${display} ${DIM}(${where})${RESET}`);
             return true;
         }
