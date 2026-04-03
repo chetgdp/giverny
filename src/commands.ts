@@ -3,7 +3,8 @@
 
 import { join } from "path";
 import { CONFIG_DEFAULTS, type ShellConfig } from "./config";
-import { normalizePerms, KAOMOJI, DIM, RED, BOLD, RESET } from "./shell-utils";
+import { normalizePerms, DIM, RED, BOLD, RESET } from "./shell-utils";
+import { KAOMOJI } from "./spinner";
 import {
     loadConfigWithSources, saveConfig, deleteConfigKeys, loadSession, loadUsage,
     loadSessions, saveSession, clearSession, loadApproved,

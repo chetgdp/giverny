@@ -1,10 +1,10 @@
 // tui.ts
-// Raw-terminal arrow-key selector for interactive setup prompts.
-// Extracted from setup.ts so it can be tested or reused.
+// Raw-terminal interactive prompts: arrow-key selectors, permission prompt.
+// Extracted from setup.ts and shell-utils.ts so TTY I/O lives in one place.
 
 import { openSync, readSync, closeSync } from "fs";
 import { execSync } from "child_process";
-import { BOLD, DIM, RESET } from "./shell-utils";
+import { BOLD, DIM, RED, INV, RESET, ui } from "./shell-utils";
 
 export interface SelectOption {
     value: string;
@@ -110,4 +110,61 @@ export function selectPrompt(
     }
 
     return options[selected].value;
+}
+
+// Permission prompt -------------------------------------------------------- /
+// Compact horizontal selector with arrow key navigation.
+// Enter = confirm (default: allow), 1/2/3 direct select, Esc/Ctrl+C = deny.
+
+export function promptPermission(toolName: string, defaultDeny = false): "allow" | "tool" | "deny" {
+    const options = ["allow", `allow all ${toolName}`, "deny"];
+    let sel = defaultDeny ? 2 : 0;
+
+    // Save terminal settings, switch to raw mode for key-by-key input
+    const saved = Bun.spawnSync(["stty", "-F", "/dev/tty", "-g"]).stdout.toString().trim();
+    Bun.spawnSync(["stty", "-F", "/dev/tty", "raw", "-echo"]);
+
+    const fd = openSync("/dev/tty", "r");
+
+    const render = () => {
+        let line = "  ";
+        for (let i = 0; i < options.length; i++) {
+            line += i === sel
+                ? `${INV} ${i + 1}. ${options[i]} ${RESET} `
+                : `${DIM} ${i + 1}. ${options[i]} ${RESET} `;
+        }
+        ui.write(`\r\x1b[K${line}`);
+    };
+
+    render();
+
+    try {
+        while (true) {
+            const buf = Buffer.alloc(8);
+            const n = readSync(fd, buf);
+            const key = buf.toString("utf8", 0, n);
+
+            if (key === "\r" || key === "\n") break;          // Enter → confirm
+            if (key === "1") { sel = 0; break; }              // direct select
+            if (key === "2") { sel = 1; break; }
+            if (key === "3") { sel = 2; break; }
+            if (key === "\x1b[C" || key === "\x1b[B") {       // right / down
+                sel = Math.min(sel + 1, 2); render();
+            }
+            if (key === "\x1b[D" || key === "\x1b[A") {       // left / up
+                sel = Math.max(sel - 1, 0); render();
+            }
+            if (key === "\x03" || key === "\x1b") {            // Ctrl+C / Esc → deny
+                sel = 2; break;
+            }
+        }
+    } finally {
+        closeSync(fd);
+        Bun.spawnSync(["stty", "-F", "/dev/tty", saved]);
+    }
+
+    // Replace prompt line with the chosen option
+    const color = sel === 2 ? RED : DIM;
+    ui.write(`\r\x1b[K  ${color}${options[sel]}${RESET}\n`);
+    return (["allow", "tool", "deny"] as const)[sel];
 }

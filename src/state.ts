@@ -3,9 +3,43 @@
 // All .giverny/ file I/O lives here.
 
 import { join } from "path";
-import { mkdirSync, readdirSync, statSync } from "fs";
+import { mkdirSync, readdirSync, statSync, readFileSync, writeFileSync } from "fs";
 import { CONFIG_DEFAULTS, HOME, GLOBAL_DIR, type ShellConfig } from "./config";
-import { loadJSON, saveJSON } from "./shell-utils";
+
+// JSON persistence helpers ------------------------------------------------- /
+// Generic load/save for the repeated pattern across config, usage, sessions.
+
+const PROJECTS_FILE = join(GLOBAL_DIR, "projects.json");
+
+export async function loadJSON<T>(filePath: string, defaultValue: T): Promise<T> {
+    try {
+        return JSON.parse(await Bun.file(filePath).text());
+    } catch {
+        return defaultValue;
+    }
+}
+
+export async function saveJSON(filePath: string, data: unknown, dir: string, pretty = false) {
+    mkdirSync(dir, { recursive: true });
+    await Bun.write(filePath, JSON.stringify(data, null, pretty ? 2 : 0) + "\n");
+    // Register project directory when writing to a local .giverny/ (not global)
+    if (dir.endsWith("/.giverny") && dir !== GLOBAL_DIR) {
+        registerProject(dir.replace(/\/\.giverny$/, ""));
+    }
+}
+
+// Track project directories that have .giverny/ folders
+function registerProject(projectDir: string) {
+    let projects: string[] = [];
+    try {
+        projects = JSON.parse(readFileSync(PROJECTS_FILE, "utf-8"));
+    } catch {}
+    if (!projects.includes(projectDir)) {
+        projects.push(projectDir);
+        mkdirSync(GLOBAL_DIR, { recursive: true });
+        writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2) + "\n");
+    }
+}
 
 // File paths ---------------------------------------------------------------- /
 export const GLOBAL_CONFIG_FILE = join(GLOBAL_DIR, "config.json");

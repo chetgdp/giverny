@@ -2,7 +2,119 @@
 // Kaomoji spinner for shell mode.
 // Uses combobulation animations instead of braille dots.
 
-import { getKaomojiSet, KAOMOJI, displayWidth, ui, DUMB, ORANGE, DIM, RESET } from "./shell-utils";
+import { displayWidth, ui, DUMB, ORANGE, DIM, RESET } from "./shell-utils";
+
+// Kaomoji (combobulation) -------------------------------------------------- /
+// Subtle 2-3 frame flipbook animations for different shell states.
+// Each set is a tight loop of the SAME character with small variations.
+
+export interface KaomojiSet {
+    frames: string[];
+    interval: number; // ms per frame
+}
+
+export const KAOMOJI: Record<string, KaomojiSet> = {
+    // calm ↔ concentrating (sweat drop appears)
+    thinking: {
+        frames: [
+            " ლ(ಠ_ಠ ლ)",
+            "ლ (ಠ_ಠლ )"
+        ],
+        interval: 500,
+    },
+    // peeking from behind wall, waves when spotting something
+    reading: {
+        frames: [
+            "|･ω･)ノ",
+            "|･ω･)ﾉ",
+        ],
+        interval: 400,
+    },
+    // pen scribbles back and forth across the page
+    writing: {
+        frames: [
+            "____φ(．．)",
+            "___φ-(．．)",
+        ],
+        interval: 500,
+    },
+    // speed trail grows as runner picks up pace
+    running: {
+        frames: [
+            "┌( >_<)┘",
+            "ε=└( >_<)┐",
+            "ε=ε=┌( >_<)┘",
+            "ε=ε=ε=└( >_<)┐",
+            "ε=ε=ε=ε=┌( >_<)┘",
+            "ε=ε=ε=ε=ε=└( >_<)┐",
+            "ε=ε=ε=ε=ε=ε=┌( >_<)┘",
+            "ε=ε=ε=ε=ε=ε=ε=└( >_<)┐",
+            "              ┌(>_< )┘",
+            "            └(>_< )┐=3",
+            "          ┌(>_< )┘=3=3",
+            "        └(>_< )┐=3=3=3",
+            "      ┌(>_< )┘=3=3=3=3",
+            "    └(>_< )┐=3=3=3=3=3",
+            "  ┌(>_< )┘=3=3=3=3=3=3",
+            "└(>_< )┐=3=3=3=3=3=3=3",
+        ],
+        interval: 250,
+    },
+    // eyes scan left and right
+    searching: {
+        frames: [
+            "( °_°)     ",
+            "  ( °_°)   ",
+            "    ( °_°) ",
+            "     ( °_°)",
+            "     (°_° )",
+            "   (°_° )  ",
+            " (°_° )    ",
+            "(°_° )     ",
+        ],
+        interval: 500,
+    },
+
+    // two characters high-fiving (hand symbol alternates)
+    agent: {
+        frames: [
+            "(・ω・)人(・ω・)",
+            "(・ω・)八(・ω・)"
+        ],
+        interval: 500,
+    },
+    blinking: {
+        frames: [
+            "( - _ - )",
+            "( 。_ 。)",
+            "( 0 _ 0 )",
+            "( 。_ 。)",
+        ],
+        interval: 500,
+    },
+    tableflip: {
+        frames: [
+            "(╮°ー° )╮   ┳━━┳",
+            " (╮°ー° )╮  ┳━━┳",
+            "  (╮°ー° )╮ ┳━━┳",
+            "   (╮°ー° )╮┳━━┳",
+            "   ( ╮°ー°)╮┳━━┳",
+            "   ( ╯°益°)╯彡┻━━┻",
+            "           ┳━━┳ノ(°ー°ノ)",
+        ],
+        interval: 1000,
+    },
+};
+
+// All sets except tableflip (that one's triggered by long waits)
+const RANDOM_POOL = Object.entries(KAOMOJI)
+    .filter(([name]) => name !== "tableflip")
+    .map(([, set]) => set);
+
+// Returns a random kaomoji set from the pool.
+export function getKaomojiSet(_label: string): KaomojiSet {
+    return RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)];
+}
 
 export interface SpinnerCtx {
     effort: string;

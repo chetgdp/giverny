@@ -1,7 +1,7 @@
 // Quick visual demorun each kaomoji animation for 2s in sequence.
 // Usage: bun tests/kaomoji-demo.ts
 
-import { KAOMOJI, type KaomojiSet } from "../src/shell-utils";
+import { KAOMOJI, type KaomojiSet } from "../src/spinner";
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";

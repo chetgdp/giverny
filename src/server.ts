@@ -36,7 +36,8 @@ import {
 const PORT = parseInt(process.env.PORT || "8741");
 
 // Session management ------------------------------------------------------- /
-// reuse Claude Code sessions across turns, evict after TTL
+// Reuse Claude Code sessions across turns, evict after TTL.
+// Single map with namespaced keys: "chat:<hash>" and "resp:<id>".
 
 const SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_SESSIONS = 100;
@@ -63,9 +64,71 @@ function evictSessions(map: Map<string, Session>) {
 }
 
 const sessions = new Map<string, Session>();
-const responseSessions = new Map<string, Session>();
 
-// Request handler --------------------------------------------------------- /
+const SSE_HEADERS = {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+};
+
+// Shared request handler -------------------------------------------------- /
+// Owns: bridge.collect with resume fallback, timing, tool call parsing.
+// Callers own: input normalization, session lookup, output formatting.
+
+async function handleRequest(ctx: {
+    messages: any[];
+    prompt: string;
+    systemPrompt: string;
+    model?: string;
+    resumeSessionId?: string;
+    isResume: boolean;
+    deleteKey?: string;
+}) {
+    const start = Date.now();
+
+    let result;
+    try {
+        result = await bridge.collect({
+            prompt: ctx.prompt,
+            systemPrompt: ctx.systemPrompt,
+            model: ctx.model,
+            sessionId: ctx.resumeSessionId,
+            options: { tools: "" },
+        });
+    } catch (e: any) {
+        if (ctx.isResume && ctx.deleteKey) {
+            log(`⚠ Resume failed, falling back to new session`);
+            sessions.delete(ctx.deleteKey);
+            result = await bridge.collect({
+                prompt: buildPrompt(ctx.messages),
+                systemPrompt: ctx.systemPrompt,
+                model: ctx.model,
+                options: { tools: "" },
+            });
+        } else {
+            throw e;
+        }
+    }
+
+    const elapsed = Date.now() - start;
+
+    // Prefer structured tool_use, fall back to text parsing
+    let parsed: ParsedResponse;
+    if (result.toolUseBlocks.length > 0) {
+        parsed = {
+            content: result.text || null,
+            tool_calls: convertToolUseBlocks(result.toolUseBlocks),
+            finish_reason: "tool_calls",
+        };
+    } else {
+        parsed = parseTextToolCalls(result.text);
+    }
+
+    return { parsed, result, elapsed };
+}
+
+// Request handlers -------------------------------------------------------- /
 
 async function handleChatCompletions(body: any): Promise<Response> {
     const { messages, tools, model, stream } = body;
@@ -83,7 +146,7 @@ async function handleChatCompletions(body: any): Promise<Response> {
     }
 
     const nonSystem = messages.filter((m: any) => m.role !== "system");
-    const key = sessionKey(messages, tools);
+    const key = `chat:${sessionKey(messages, tools)}`;
     const session = sessions.get(key);
     if (session) session.accessedAt = Date.now();
 
@@ -118,57 +181,23 @@ async function handleChatCompletions(body: any): Promise<Response> {
     if (isResume) sessionTag = ` [RESUME ${resumeSessionId!.slice(0, 8)}… delta=${nonSystem.length - (session?.sentMsgCount || 0)} msgs]`;
     log(`→ claude -p | ${msgCount} msgs, ${toolCount} tools, model=${model || "default"}, stream=${!!stream}${sessionTag}`);
 
-    const start = Date.now();
+    const { parsed, result, elapsed } = await handleRequest({
+        messages, prompt, systemPrompt, model,
+        resumeSessionId, isResume, deleteKey: key,
+    });
 
-    let result;
-    try {
-        result = await bridge.collect({
-            prompt,
-            systemPrompt,
-            model,
-            sessionId: resumeSessionId,
-            options: { tools: "" },
-        });
-    } catch (e: any) {
-        if (isResume) {
-            log(`⚠ Resume failed, falling back to new session`);
-            sessions.delete(key);
-            result = await bridge.collect({
-                prompt: buildPrompt(messages),
-                systemPrompt,
-                model,
-                options: { tools: "" },
-            });
-        } else {
-            throw e;
-        }
-    }
-
-    const elapsed = Date.now() - start;
-
-    // Build parsed response: prefer structured tool_use, fall back to text parsing
-    let parsed: ParsedResponse;
-
+    // Session management: tool call turns corrupt the session, text-only updates it
     if (result.toolUseBlocks.length > 0) {
-        parsed = {
-            content: result.text || null,
-            tool_calls: convertToolUseBlocks(result.toolUseBlocks),
-            finish_reason: "tool_calls",
-        };
         // Tool call turns corrupt the session (Claude Code logs an error internally)
         // so delete the session to force a fresh one next turn
         sessions.delete(key);
-    } else {
-        parsed = parseTextToolCalls(result.text);
-        // Update session for text-only responses
-        if (result.sessionId) {
-            evictSessions(sessions);
-            sessions.set(key, {
-                backendSessionId: result.sessionId,
-                sentMsgCount: nonSystem.length,
-                accessedAt: Date.now(),
-            });
-        }
+    } else if (result.sessionId) {
+        evictSessions(sessions);
+        sessions.set(key, {
+            backendSessionId: result.sessionId,
+            sentMsgCount: nonSystem.length,
+            accessedAt: Date.now(),
+        });
     }
 
     const textLen = parsed.content?.length || 0;
@@ -180,20 +209,11 @@ async function handleChatCompletions(body: any): Promise<Response> {
     log(msg);
 
     if (stream) {
-        return new Response(buildSSEStream(parsed, model, result.usage), {
-            headers: {
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                Connection: "keep-alive",
-                "Access-Control-Allow-Origin": "*",
-            },
-        });
+        return new Response(buildSSEStream(parsed, model, result.usage), { headers: SSE_HEADERS });
     }
 
     return Response.json(makeOpenAIResponse(parsed, model, result.usage));
 }
-
-// Responses handler ------------------------------------------------------- /
 
 async function handleResponses(body: any): Promise<Response> {
     const { input, instructions, tools, model, stream, previous_response_id } = body;
@@ -212,9 +232,10 @@ async function handleResponses(body: any): Promise<Response> {
     let prompt: string;
     let resumeSessionId: string | undefined;
     let isResume = false;
+    const lookupKey = previous_response_id ? `resp:${previous_response_id}` : undefined;
 
-    if (previous_response_id) {
-        const session = responseSessions.get(previous_response_id);
+    if (lookupKey) {
+        const session = sessions.get(lookupKey);
         if (session) {
             session.accessedAt = Date.now();
             prompt = buildPrompt(messages);
@@ -234,53 +255,17 @@ async function handleResponses(body: any): Promise<Response> {
     if (isResume) sessionTag = ` [RESUME ${resumeSessionId!.slice(0, 8)}…]`;
     log(`→ claude -p | responses, ${toolCount} tools, model=${model || "default"}, stream=${!!stream}${sessionTag}`);
 
-    const start = Date.now();
-
-    let result;
-    try {
-        result = await bridge.collect({
-            prompt,
-            systemPrompt,
-            model,
-            sessionId: resumeSessionId,
-            options: { tools: "" },
-        });
-    } catch (e: any) {
-        if (isResume) {
-            log(`⚠ Resume failed, falling back to new session`);
-            responseSessions.delete(previous_response_id!);
-            result = await bridge.collect({
-                prompt: buildPrompt(messages),
-                systemPrompt,
-                model,
-                options: { tools: "" },
-            });
-        } else {
-            throw e;
-        }
-    }
-
-    const elapsed = Date.now() - start;
-
-    // Parse tool calls — same logic as chat/completions
-    let parsed: ParsedResponse;
-
-    if (result.toolUseBlocks.length > 0) {
-        parsed = {
-            content: result.text || null,
-            tool_calls: convertToolUseBlocks(result.toolUseBlocks),
-            finish_reason: "tool_calls",
-        };
-    } else {
-        parsed = parseTextToolCalls(result.text);
-    }
+    const { parsed, result, elapsed } = await handleRequest({
+        messages, prompt, systemPrompt, model,
+        resumeSessionId, isResume, deleteKey: lookupKey,
+    });
 
     const responseId = randomId("resp_", 8);
 
     // Store session for future previous_response_id lookups (text-only responses)
     if (result.sessionId && result.toolUseBlocks.length === 0) {
-        evictSessions(responseSessions);
-        responseSessions.set(responseId, {
+        evictSessions(sessions);
+        sessions.set(`resp:${responseId}`, {
             backendSessionId: result.sessionId,
             sentMsgCount: nonSystem.length,
             accessedAt: Date.now(),
@@ -295,14 +280,7 @@ async function handleResponses(body: any): Promise<Response> {
     log(msg);
 
     if (stream) {
-        return new Response(buildResponsesSSEStream(parsed, model, result.usage, responseId), {
-            headers: {
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                Connection: "keep-alive",
-                "Access-Control-Allow-Origin": "*",
-            },
-        });
+        return new Response(buildResponsesSSEStream(parsed, model, result.usage, responseId), { headers: SSE_HEADERS });
     }
 
     return Response.json(makeResponseObject(parsed, model, result.usage, responseId));
