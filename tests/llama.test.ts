@@ -13,7 +13,7 @@ describe("backend registry", () => {
         const b = getBackend("completions");
         expect(b.info.name).toBe("completions");
         expect(b.info.capabilities.agentLoop).toBe(false);
-        expect(b.info.capabilities.sessions).toBe(false);
+        expect(b.info.capabilities.sessions).toBe(true);
     });
 
     it("throws on unknown backend", () => {

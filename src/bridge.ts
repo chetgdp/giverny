@@ -69,6 +69,12 @@ export function buildClaudeArgs(opts: GenerateOptions): string[] {
         args.push("--resume", opts.sessionId);
     }
 
+    // Name the session with prompt preview so it's discoverable in `claude --resume`
+    if (!opts.sessionId) {
+        const name = opts.prompt.replace(/\n.*/s, "").slice(0, 40).trim();
+        if (name) args.push("--name", name);
+    }
+
     if (opts.systemPrompt) {
         args.push("--system-prompt", opts.systemPrompt);
     }

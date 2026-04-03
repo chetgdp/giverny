@@ -1,5 +1,4 @@
 - maybe still broke idk, keep this up here
-- claude and giverny resume not integrated
 
 ## general refactor (WE ARE DOING IT)
 - easy mode dedup fixes
@@ -143,3 +142,4 @@ the point is that we are testing this with claude but the real killer is a compo
     - [x] iSH repeating spinner on each newline (column width too wide?)
 - [x] escape codes appearing inside nvim `:!` mode (added DUMB mode for no tty)
 - [x] fix base system prompt for agent mode easily editable in its own file
+- [x] claude and giverny resume much better (/resume [id] claude)

@@ -99,7 +99,7 @@ The `GIVERNY_CLAUDE_BIN` env var overrides the claude binary path (defaults to `
 
 ## Plans
 
-Implementation plans go in `./plans/`. Completed plans move to `./plans/done/`.
+When asked to "make a plan", write a markdown file in `./plans/`. Do NOT use EnterPlanMode — write the plan as a file. Completed plans move to `./plans/done/`.
 
 ## TODO
 

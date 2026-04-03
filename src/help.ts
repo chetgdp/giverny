@@ -41,7 +41,8 @@ export function printHelp(prefix = ",") {
     console.log("  /tools [list]             Show available tools, or set filter");
     console.log("  /diff [instruction]       Analyze git diff (default: summarize)");
     console.log("  /compact [focus]          Compact context (focus: what to prioritize)");
-    console.log("  /resume [id]              List sessions, or resume by number/id");
+    console.log("  /resume [id] [claude]     List sessions, or resume by number/id");
+    console.log("                            Add 'claude' to open in claude code");
     console.log("  /export [file]            Export transcript (to file or stdout)");
     console.log("  /last /copy               Print last response (pipe to clipboard)");
     console.log("  /new [prompt]             Clear session (optionally run prompt)");

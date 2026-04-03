@@ -189,7 +189,7 @@ async function readSessionHeader(path: string): Promise<{
     entrypoint?: string;
 }> {
     try {
-        const chunk = await Bun.file(path).slice(0, 4096).text();
+        const chunk = await Bun.file(path).slice(0, 16384).text();
         const lines = chunk.split("\n").filter(Boolean);
 
         // First pass: look for user message (richest metadata)

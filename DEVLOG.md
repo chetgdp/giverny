@@ -80,10 +80,16 @@ you could have giverny shell mode hit the opencode server client and use their a
 
 everyone is thinking of computer with vision models and clicking on a virtual screen but the shell is terminal is the computer in language that is the model's native world
 
+the terminal was the original chat app, you go up to it, type some words in, it doesn't do anything, cause you can't talk to it in english, you need to know the magic words. well, now you can talk to it in english, or whatever language. `user@computer ~> @ do stuff`
+
+so we have three userbases, people who know the shell, people who don't know the shell but can now use it, LLMs that know everything
+
 ## refactoring
 So far I have barely written any lines of this project over the course of 10 days of building it with claude code. not surprising to me, given that typescript(it's just js) is quite easy to just shit out. also I have a knack for holding the leash, I can spot stupid shit before it happens and have done so on this project. So far its under 5500 lines of source code. I've maintained the architectural design decisions. Time to see if it paid off. 
 
 Now time to go into the mines and actually read it. A step that is quite rare
+
+
 
 ---
 

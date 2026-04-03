@@ -34,7 +34,10 @@ const VALID_VERBOSE = ["quiet", "normal", "verbose"];
 const REST_COMMANDS = new Set(["prompt", "compact", "diff"]);
 
 // Commands that consume exactly one argument
-const ONE_ARG_COMMANDS = new Set(["model", "effort", "perms", "tools", "output", "session", "timeout", "resume", "continue", "export"]);
+const ONE_ARG_COMMANDS = new Set(["model", "effort", "perms", "tools", "output", "session", "timeout", "export"]);
+
+// Commands that consume exactly two arguments
+const TWO_ARG_COMMANDS = new Set(["resume", "continue"]);
 
 interface ParsedCommand {
     name: string;
@@ -53,7 +56,7 @@ function parseCommand(cmd: string): ParsedCommand {
         return { name, arg: argParts.join(" "), remainder: "", isLocal };
     }
 
-    const arity = ONE_ARG_COMMANDS.has(name) ? 1 : 0;
+    const arity = TWO_ARG_COMMANDS.has(name) ? 2 : ONE_ARG_COMMANDS.has(name) ? 1 : 0;
     let isLocal = false;
     let consumed = 1; // command name
     let argsConsumed = 0;
@@ -479,8 +482,9 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                     const mark = s.active ? ` ${BOLD}(active)${RESET}` : "";
                     const idx = `${i + 1}.`;
                     const preview = s.prompt ? `  ${s.prompt.slice(0, 60)}` : "";
+                    const origin = isClaude && s.origin ? ` ${DIM}(${s.origin})${RESET}` : "";
                     const model = !isClaude && s.slug ? ` ${DIM}(${s.slug})${RESET}` : "";
-                    console.log(`  ${DIM}${idx.padEnd(4)}${RESET}${s.id.slice(0, 8)}… ${DIM}${ago}${mark}${RESET}${model}`);
+                    console.log(`  ${DIM}${idx.padEnd(4)}${RESET}${s.id.slice(0, 8)}… ${DIM}${ago}${mark}${RESET}${origin}${model}`);
                     if (preview) console.log(`       ${DIM}${preview}${RESET}`);
                 }
                 if (total > sessions.length) {
@@ -491,22 +495,45 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 } else {
                     console.log(`\n${DIM}.giverny/conversations/${RESET}`);
                 }
-                console.log(`${DIM}/resume <number> or /resume <id>${RESET}`);
+                console.log(`${DIM}/resume <n>  ·  /resume <n> claude${RESET}`);
                 return chainRemainder(remainder, bridge);
             }
-            // Resume by index or ID prefix
+            // Parse: /resume <id> [mode]
+            const [selector, mode] = arg.split(/\s+/);
             let target: string | null = null;
-            const idx = parseInt(arg);
+            const idx = parseInt(selector);
             if (!isNaN(idx) && idx >= 1 && idx <= sessions.length) {
                 target = sessions[idx - 1].id;
             } else {
-                const match = sessions.find(s => s.id.startsWith(arg));
+                const match = sessions.find(s => s.id.startsWith(selector));
                 target = match?.id || null;
             }
             if (!target) {
-                console.log(`${RED}session not found: ${arg}${RESET}`);
+                console.log(`${RED}session not found: ${selector}${RESET}`);
                 return true;
             }
+
+            // Claude mode: hand off to claude interactive
+            if (mode === "claude" || mode === "c") {
+                console.log(`claude -r ${target}`);
+                if (process.stdin.isTTY) {
+                    process.stderr.write(`${DIM}open in claude? [Y/n] ${RESET}`);
+                    const buf = Buffer.alloc(1);
+                    const { openSync, readSync, closeSync } = await import("fs");
+                    const fd = openSync("/dev/tty", "r");
+                    readSync(fd, buf, 0, 1, null);
+                    closeSync(fd);
+                    const ch = buf[0];
+                    process.stderr.write("\n");
+                    if (ch === 0x59 || ch === 0x79 || ch === 0x0a || ch === 0x0d) {
+                        Bun.spawnSync(["claude", "-r", target], { stdio: ["inherit", "inherit", "inherit"] });
+                        process.exit(0);
+                    }
+                }
+                return true;
+            }
+
+            // Default: resume in giverny
             await saveSession(target);
             console.log(`resumed: ${target.slice(0, 8)}…`);
             return chainRemainder(remainder, bridge);
