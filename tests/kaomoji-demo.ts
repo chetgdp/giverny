@@ -5,7 +5,7 @@ import { KAOMOJI, type KaomojiSet } from "../src/shell-utils";
 
 const DIM = "\x1b[2m";
 const RESET = "\x1b[0m";
-const MAX_TIME = 10000;
+const MAX_TIME = 3000;
 
 function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));

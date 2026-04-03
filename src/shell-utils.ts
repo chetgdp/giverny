@@ -251,11 +251,21 @@ export const KAOMOJI: Record<string, KaomojiSet> = {
         ],
         interval: 500,
     },
+
     // two characters high-fiving (hand symbol alternates)
     agent: {
         frames: [
             "(・ω・)人(・ω・)", 
             "(・ω・)八(・ω・)"
+        ],
+        interval: 500,
+    },
+    blinking: {
+        frames: [
+            "( - _ - )",
+            "( 。_ 。)",
+            "( 0 _ 0 )",
+            "( 。_ 。)",
         ],
         interval: 500,
     },

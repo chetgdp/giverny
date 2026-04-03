@@ -1,10 +1,12 @@
+- maybe still broke idk, keep this up here
+- claude and giverny resume not integrated
+
 ## general refactor (WE ARE DOING IT)
 - easy mode dedup fixes
 - deeper architectureal stuff
 - study vt100 protocol to understand REPL and escape codes
 
 ### reading the code
-- run.ts → see how args pick the mode
 - src/shell.ts → the primary interface (interactive + piped)
 - src/bridge-loop.ts → Bridge class, the central abstraction everything talks to
 - src/backend.ts → Backend interface contract (short, defines the shape)
@@ -22,7 +24,6 @@
     - [x] drain stderr bug
     - [x] user set timeout?
     - [x] await proc.exited after kil
-    - maybe still broke idk, keep this up here
 - [] terminal bench harbor benchmark [x] giverny controls setup vs inference backend setup (two flows, one combined)
 
 

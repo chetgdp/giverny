@@ -11,7 +11,11 @@
 const args = process.argv.slice(2);
 const cmd = args[0]; 
 
+
+// ok switch case, what does that compile to? lookup table if yes, good idk
 switch (cmd) {
+
+// this
     case "--server":
     case "-s":
         await import("./src/server.ts");
@@ -19,6 +23,10 @@ switch (cmd) {
     case "--setup":
         await import("./src/setup.ts");
         break;
+
+// this could be somehwere
+// or do we even need it, running setup is way better
+// AFUERA
     case "--use": {
         // giverny --use completions http://192.168.2.16:8080
         // giverny --use claude-code
@@ -28,6 +36,7 @@ switch (cmd) {
         const GLOBAL_CONFIG = join(GLOBAL_DIR, "config.json");
         const backend = args[1];
         const url = args[2] || "";
+        // more are valid than this?
         const valid = ["claude-code", "completions"];
         if (!backend || !valid.includes(backend)) {
             console.log(`Usage: giverny --use <${valid.join("|")}> [url]`);
@@ -51,9 +60,13 @@ switch (cmd) {
         console.log(`backend → ${backend}${url ? ` (${url})` : ""}`);
         break;
     }
+
+// useful actually, for a one liner to disappear itself as well
     case "--uninstall":
         await import("./src/uninstall.ts");
         break;
+
+// this could be its own function
     case "--help":
     case "-h":
         const { readFileSync, existsSync } = await import("fs");
@@ -68,6 +81,9 @@ switch (cmd) {
         const { printHelp } = await import("./src/help.ts");
         printHelp(pfx);
         break;
+
+// if pipe is the glue between everything in the shell
+// then giverny is what?
     default: {
         const { main } = await import("./src/shell.ts");
         await main();

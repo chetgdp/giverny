@@ -164,7 +164,7 @@ function parseNdjsonLine(line: string): BridgeEvent | null {
 
 // Generate ---------------------------------------------------------------- //
 // Spawns claude, streams NDJSON events via callback. Returns ok/error.
-
+// 100 line function lol
 async function generate(
     opts: GenerateOptions,
     onEvent: (event: BridgeEvent, control: AbortControl) => void,
@@ -172,7 +172,8 @@ async function generate(
     const args = buildClaudeArgs(opts);
     const timeout = opts.timeout ?? DEFAULT_TIMEOUT;
 
-    const proc = Bun.spawn(["claude", ...args], {
+    const bin = process.env.GIVERNY_CLAUDE_BIN || "claude";
+    const proc = Bun.spawn([bin, ...args], {
         cwd: opts.cwd || process.cwd(),
         stdin: new Response(opts.prompt),
         stdout: "pipe",
@@ -188,14 +189,21 @@ async function generate(
         resume: () => { try { process.kill(proc.pid, "SIGCONT"); } catch {} },
     };
 
-    const timer = setTimeout(() => proc.kill(), timeout);
-
     // Drain stderr in background to prevent pipe buffer saturation (64KB).
     // If claude blocks on a stderr write, stdout stalls and we hang.
     let stderrText = "";
-    const stderrDrain = new Response(proc.stderr).text().then(s => { stderrText = s; });
+    const stderrDrain = new Response(proc.stderr).text()
+        .then(s => { stderrText = s; })
+        .catch(() => {});
 
     const reader = proc.stdout.getReader();
+
+    // Timeout backstop: kill the process AND cancel the stdout reader.
+    // Both are needed because orphaned child processes can hold pipes open.
+    const timer = setTimeout(() => {
+        proc.kill(9);
+        reader.cancel();
+    }, timeout);
     const decoder = new TextDecoder();
     let buffer = "";
     let sessionId: string | undefined;
@@ -243,18 +251,16 @@ async function generate(
 
     if (gotResult) {
         clearTimeout(timer);
-        proc.kill();
-        // Wait for process to actually exit so stderr pipe closes
-        // and the stderrDrain reader doesn't keep the event loop alive
+        proc.kill(9);
         await proc.exited;
         return { ok: true, sessionId };
     }
 
-    // Don't clear timer here — it's the backstop that kills a hung process.
-    // It fires if proc.exited never resolves.
-    await stderrDrain;
+    // No result event — wait for process to finish, with timeout as backstop.
     const exitCode = await proc.exited;
     clearTimeout(timer);
+    // Give stderr a moment to flush, then bail
+    await Promise.race([stderrDrain, new Promise(r => setTimeout(r, 500))]);
 
     if (exitCode !== 0) {
         return { ok: false, sessionId, error: stderrText || `claude exited with code ${exitCode}` };

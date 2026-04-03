@@ -85,7 +85,17 @@ bun test:unit              # unit only (config, bridge, protocol, shell-utils)
 bun test:integration       # HTTP integration (server on port 18741)
 ```
 
-Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without side effects. Integration tests start a real server.
+Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without side effects. Integration tests start a real server. `tests/hanging.test.ts` tests process lifecycle — uses `GIVERNY_CLAUDE_BIN` to inject a fake claude script.
+
+## Process lifecycle (do not break)
+
+`src/bridge.ts` spawns `claude -p` and reads NDJSON from stdout. Three invariants that prevent hanging:
+
+1. **Stderr must drain in background** — started before the read loop. If claude blocks on a stderr write (64KB pipe buffer full), stdout stalls. The drain runs as a fire-and-forget promise.
+2. **Timeout must cancel the stdout reader** — `proc.kill(9)` alone is not enough. Orphaned child processes (tool executions) inherit pipe fds and keep them open. The timeout handler must call both `proc.kill(9)` AND `reader.cancel()` to break the read loop.
+3. **gotResult path must not await stderr** — after receiving a result event, kill the process and return immediately. Do not await stderrDrain — orphaned children may hold the pipe open indefinitely.
+
+The `GIVERNY_CLAUDE_BIN` env var overrides the claude binary path (defaults to `"claude"`). Used by tests to inject controlled behavior.
 
 ## Plans
 
