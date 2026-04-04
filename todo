@@ -1,4 +1,16 @@
-- maybe still broke idk, keep this up here
+## todo next
+- hanging maybe still broke idk, keep this up here
+- [x] claude and giverny resume much better (/resume [id] claude)
+    - only user messages load into resume history 
+- make normal mode output full diffs but shortened other calls
+- fix backend vs perms setup flows
+- [] general refactor
+- [] play unix commnads more for edge cases
+- [] still hanging after some toolcalls
+    - [x] drain stderr bug
+    - [x] user set timeout?
+    - [x] await proc.exited after kil
+- [] terminal bench harbor benchmark [x] giverny controls setup vs inference backend setup (two flows, one combined)
 
 ## general refactor (WE ARE DOING IT)
 - easy mode dedup fixes
@@ -15,15 +27,6 @@
 - Server mode: src/server.ts → src/protocol.ts
 - Tools: src/tools.ts (tool definitions for non-claude-code backends)
 - Shell utilities: src/shell-utils.ts (permissions, formatting)
-
-## todo next
-- [] general refactor
-- [] play unix commnads more for edge cases
-- [] still hanging after some toolcalls
-    - [x] drain stderr bug
-    - [x] user set timeout?
-    - [x] await proc.exited after kil
-- [] terminal bench harbor benchmark [x] giverny controls setup vs inference backend setup (two flows, one combined)
 
 
 ## todo goodies
@@ -142,4 +145,3 @@ the point is that we are testing this with claude but the real killer is a compo
     - [x] iSH repeating spinner on each newline (column width too wide?)
 - [x] escape codes appearing inside nvim `:!` mode (added DUMB mode for no tty)
 - [x] fix base system prompt for agent mode easily editable in its own file
-- [x] claude and giverny resume much better (/resume [id] claude)

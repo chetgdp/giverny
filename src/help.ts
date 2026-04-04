@@ -1,15 +1,26 @@
-// help.tssingle source of truth for giverny help output
+// help.ts: single source of truth for giverny help output
 
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 import { BOLD, DIM, RESET } from "./shell-utils";
 
-export function printHelp(prefix = ",") {
+function getPrefix(): string {
+    const cfgPath = join(process.env.HOME || "~", ".giverny/config.json");
+    if (existsSync(cfgPath)) {
+        try { return JSON.parse(readFileSync(cfgPath, "utf-8")).prefix || ","; } catch {}
+    }
+    return ",";
+}
+
+export function printHelp(prefix?: string) {
+    const pfx = prefix ?? getPrefix();
     const shell = (process.env.SHELL || "").split("/").pop() || "unknown";
 
-    console.log(`${BOLD}giverny${RESET} ${DIM}v0.1.0${RESET}  ${DIM}(${shell}, prefix: ${prefix})${RESET}\n`);
+    console.log(`${BOLD}giverny${RESET} ${DIM}v0.1.0${RESET}  ${DIM}(${shell}, prefix: ${pfx})${RESET}\n`);
 
-    console.log(`Usage: ${prefix} <prompt>`);
-    console.log(`       cat file | ${prefix} analyze this`);
-    console.log(`       ${prefix}              (interactive mode)\n`);
+    console.log(`Usage: ${pfx} <prompt>`);
+    console.log(`       cat file | ${pfx} analyze this`);
+    console.log(`       ${pfx}              (interactive mode)\n`);
 
     console.log(`${BOLD}Modes${RESET}`);
     console.log("  giverny [prompt]          Interactive shell (default)");
