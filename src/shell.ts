@@ -2,74 +2,104 @@
 /*
 * Giverny Shell Mode
 *
+*---- wrong
 * Wraps `claude -p` with native Claude Code tools enabled and persistent
 * per-directory sessions. Streams output to the terminal with compact
 * tool usage summaries.
+*----
+* The shell mode is one end of the bridge, this is the main UX of giverny
+* we have shell <-> bridge <-> backend apis <-> models
 *
 * Usage: giverny <prompt>
 *        giverny --tools "Read,Bash" <prompt>
 */
 
+
+// we could clean these imports up? better order?
 import { mkdirSync } from "fs";
 import { CONFIG_DEFAULTS } from "./config";
 import { getBackend } from "./backend";
 import type { BridgeEvent, RunControl } from "./backend";
 import { Bridge } from "./bridge-loop";
-import { needsPermission, isDangerousCommand, summarizeTool, DIM, RED, ORANGE, SEA_GREEN, RESET, INV, PIPED, ui } from "./shell-utils";
+import {
+    DIM, RED, ORANGE, SEA_GREEN, RESET, INV, PIPED,
+    needsPermission, isDangerousCommand, summarizeTool, ui 
+} from "./shell-utils";
 import { promptPermission } from "./tui";
 import { TOOL_SYSTEM_PROMPT } from "./tools";
-import { loadJSON, loadConfig, loadSession, saveSession, clearSession, loadUsage, saveUsage, loadApproved, saveApproved, discoverSessions, discoverConversations, resolvePromptFile, GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE } from "./state";
+import { 
+    GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE,
+    loadJSON, loadConfig, loadSession, loadApproved, loadUsage, 
+    saveSession, saveUsage, saveApproved, clearSession, 
+    discoverSessions, discoverConversations, resolvePromptFile  
+} from "./state";
 import { createSpinner } from "./spinner";
 import { handleSlashCommand } from "./commands";
 export { handleSlashCommand };
 
+// what is this number
 const MAX_RESULT_LINES = 10;
 
-// Claude invocation via bridge --------------------------------------------- /
-
+// LLM invocation via bridge ------------------------------------------------ /
+//input
 export interface RunShellOpts {
-    prompt: string;
-    model: string;
-    effort: string;
-    perms: string;
-    tools: string;
-    output: string;
-    timeout?: number;
-    systemPrompt?: string;
-    url?: string;
-    apiKey?: string;
-    clusterId?: string;
-    bridge: Bridge;
+    prompt:         string;
+    model:          string;
+    effort:         string;
+    perms:          string;
+    tools:          string;
+    output:         string;
+    timeout?:       number;
+    systemPrompt?:  string;
+    url?:           string;
+    apiKey?:        string;
+    clusterId?:     string;
+    // why is this an option? (opts?)
+    bridge:         Bridge;
 }
 
+//output
 interface ShellResult {
-    sessionId: string | null;
-    approvedTools: Set<string>;
-    killed: boolean;
-    usage: { input_tokens: number; output_tokens: number } | null;
-    durationMs: number | null;
-    numTurns: number;
-    responseText: string;
+    sessionId:      string | null;
+    approvedTools:  Set<string>;
+    killed:         boolean;
+    usage:          { input_tokens: number; output_tokens: number } | null;
+    durationMs:     number | null;
+    numTurns:       number;
+    responseText:   string;
 }
 
-export async function runShell(opts: RunShellOpts, sessionId: string | null, approvedTools: Set<string>, overridePerms?: string): Promise<ShellResult> {
-    const { prompt, model, effort, perms, tools, output, url, apiKey, clusterId, bridge } = opts;
+// the main argument parsing function
+export async function runShell(
+    opts:           RunShellOpts, 
+    sessionId:      string | null, 
+    approvedTools:  Set<string>, 
+    overridePerms?: string): 
+Promise<ShellResult> {
+    // where does this come from?
+    const { prompt, model, effort, perms, tools, 
+        output, url, apiKey, clusterId, bridge } = opts;
     const effectivePerms = overridePerms || perms;
     const isAskMode = effectivePerms === "ask";
     const isConfirmMode = effectivePerms === "confirm";
+    // what is killed? the process?
     let killed = false;
 
+    // hmmm this is important UX but why is thinking set here?
     const spinner = createSpinner({ effort });
     spinner.start("thinking");
     let streamedText = false;
     let responseText = "";
+    // what is an event?
     const onEvent = (event: BridgeEvent, control: RunControl) => {
+        // one of the ways we stop hanging?
         if (killed) return;
-
+        // this many nested ifs now thats what I call slopus 4.6
         if (event.type === "assistant") {
             for (const block of event.blocks) {
                 if (killed) return;
                 if (block.type === "tool_use") {
+                    // why are we stopping the spinner here?
                     spinner.stop();
 
                     // Ensure tool summary starts on its own line
@@ -77,6 +107,7 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
                         ui.write("\n");
                     }
 
+                    // why is this inside its own scope?
                     {
                         const summary = summarizeTool(block.name, block.input);
                         ui.write(`${DIM}[${block.name}] ${summary}${RESET}\n`);

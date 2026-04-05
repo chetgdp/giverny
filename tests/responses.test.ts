@@ -23,7 +23,10 @@ describe("parseResponsesSSE", () => {
             }),
         );
         expect(result.toolCall).toBeDefined();
-        expect(result.toolCall!.id).toBe("call_abc");
+        // id = item.id (for accumulation matching with delta/done item_id)
+        expect(result.toolCall!.id).toBe("fc_123");
+        // callId = call_id (for tool result matching in bridge loop)
+        expect(result.toolCall!.callId).toBe("call_abc");
         expect(result.toolCall!.name).toBe("exec");
     });
 
@@ -262,14 +265,19 @@ describe("convertToResponsesInput", () => {
         expect(input[0].arguments).toBe('{"command":"ls"}');
     });
 
-    it("splits assistant text + tool_calls into separate items", () => {
+    it("splits assistant text + tool_calls into separate items (full ResponseInputItem format)", () => {
         const input = convertToResponsesInput([{
             role: "assistant",
             content: "checking...",
             tool_calls: [{ id: "call_1", type: "function", function: { name: "exec", arguments: '{}' } }],
         }]);
         expect(input).toHaveLength(2);
-        expect(input[0]).toEqual({ role: "assistant", content: "checking..." });
+        // With tool_calls present, spec flavor uses full ResponseInputItem format
+        expect(input[0].type).toBe("message");
+        expect(input[0].role).toBe("assistant");
+        expect(input[0].content).toEqual([{ type: "output_text", text: "checking..." }]);
+        expect(input[0].id).toBeDefined();
+        expect(input[0].status).toBe("completed");
         expect(input[1].type).toBe("function_call");
     });
 

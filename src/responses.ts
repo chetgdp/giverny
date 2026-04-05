@@ -29,6 +29,7 @@ import {
     checkEndpointStatus,
     createCachedInfoGetter,
 } from "./backend-utils";
+import { randomId } from "./protocol";
 
 // Flatten OpenAI chat/completions tool format to responses format
 // {type: "function", function: {name, description, parameters}}
@@ -53,9 +54,19 @@ function flattenToolSchemas(tools: any[]): any[] {
 //   {role: "tool", tool_call_id, content}
 // Convert chat/completions messages to responses API input format.
 // Two flavors because implementations disagree:
-//   "spec"     — OpenAI spec: {role, content: "string"} (actual.inc, OpenAI, OpenRouter)
-//   "extended" — llama.cpp:   {type: "message", role, content: [{type: "output_text", text}]}
+//   "spec"     — OpenAI spec (actual.inc, OpenAI, OpenRouter)
+//   "extended" — llama.cpp: {type: "message", role, content: [{type: "output_text", text}]}
+//
+// The `input` array is validated as `string | EasyInputMessage[] | ResponseInputItem[]`.
+// You can't mix formats — if any item has type/id (function_call, function_call_output),
+// ALL items must be ResponseInputItems. So we detect whether the conversation has tool
+// calls and use the full typed format for the entire array when it does.
 export function convertToResponsesInput(messages: any[], flavor: "spec" | "extended" = "spec"): any[] {
+    // Check if conversation has tool calls — if so, must use full ResponseInputItem format
+    const hasToolCalls = flavor === "spec" && messages.some(
+        m => (m.role === "assistant" && m.tool_calls?.length) || m.role === "tool"
+    );
+
     const input: any[] = [];
 
     for (const msg of messages) {
@@ -65,23 +76,37 @@ export function convertToResponsesInput(messages: any[], flavor: "spec" | "exten
             if (msg.content) {
                 input.push(flavor === "extended"
                     ? { type: "message", role: "assistant", content: [{ type: "output_text", text: msg.content }] }
-                    : { role: "assistant", content: msg.content });
+                    : { type: "message", id: randomId("msg_", 8), role: "assistant", status: "completed", content: [{ type: "output_text", text: msg.content }] });
             }
             for (const tc of msg.tool_calls) {
                 input.push({
                     type: "function_call",
+                    id: randomId("fc_", 8),
                     call_id: tc.id,
                     name: tc.function?.name || tc.name,
                     arguments: typeof tc.function?.arguments === "string"
                         ? tc.function.arguments
                         : JSON.stringify(tc.function?.arguments || {}),
+                    status: "completed",
                 });
             }
         } else if (msg.role === "tool") {
             input.push({
                 type: "function_call_output",
+                id: randomId("fco_", 8),
                 call_id: msg.tool_call_id,
                 output: msg.content || "",
+            });
+        } else if (hasToolCalls) {
+            // Full ResponseInputItem format — required when array has typed items
+            input.push({
+                type: "message",
+                id: randomId("msg_", 8),
+                role: msg.role,
+                status: "completed",
+                content: msg.role === "assistant"
+                    ? [{ type: "output_text", text: msg.content || "" }]
+                    : msg.content,
             });
         } else if (flavor === "extended" && msg.role === "assistant") {
             input.push({
@@ -89,10 +114,9 @@ export function convertToResponsesInput(messages: any[], flavor: "spec" | "exten
                 content: [{ type: "output_text", text: msg.content || "" }],
             });
         } else if (flavor === "extended") {
-            // user messages with type wrapper
             input.push({ type: "message", role: msg.role, content: msg.content });
         } else {
-            // spec: plain {role, content} for user and assistant
+            // EasyInputMessage: plain {role, content} — only safe when no tool calls in history
             input.push({ role: msg.role, content: msg.content });
         }
     }
@@ -134,6 +158,9 @@ function buildRequestBody(opts: GenerateOptions): any {
     if (opts.model && opts.model !== "local") body.model = opts.model;
     if (extra.temperature !== undefined) body.temperature = extra.temperature;
     if (extra.top_p !== undefined) body.top_p = extra.top_p;
+    // Default max_output_tokens to avoid servers with broken context auto-compute
+    // (e.g. actual.inc defaulting to a value that exceeds their own context length)
+    body.max_output_tokens = extra.max_output_tokens ?? 32768;
 
     return body;
 }
@@ -142,7 +169,7 @@ function buildRequestBody(opts: GenerateOptions): any {
 // Returns the event type and parsed data, or null for non-data lines.
 export function parseResponsesSSE(eventType: string, data: string): {
     text?: string;
-    toolCall?: { id: string; name: string; argumentsDelta?: string; argumentsDone?: string };
+    toolCall?: { id: string; callId?: string; name: string; argumentsDelta?: string; argumentsDone?: string };
     completed: boolean;
 } {
     if (!eventType || !data) return { completed: false };
@@ -156,9 +183,12 @@ export function parseResponsesSSE(eventType: string, data: string): {
 
             case "response.output_item.added":
                 if (json.item?.type === "function_call") {
+                    // id = item.id for accumulation (matches item_id in delta/done events)
+                    // callId = call_id for output block identity (matches function_call_output)
                     return {
                         toolCall: {
-                            id: json.item.call_id || json.item.id,
+                            id: json.item.id,
+                            callId: json.item.call_id || json.item.id,
                             name: json.item.name,
                         },
                         completed: false,
@@ -299,8 +329,10 @@ async function generate(
                             }
                         } else if (tc.name) {
                             // New tool call (from output_item.added)
+                            // Map key = item.id (matches item_id in delta/done events)
+                            // Stored id = callId (for tool result matching in bridge loop)
                             toolCallAccum.set(tc.id, {
-                                id: tc.id,
+                                id: tc.callId || tc.id,
                                 name: tc.name,
                                 arguments: "",
                             });

@@ -97,6 +97,12 @@ Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without sid
 
 The `GIVERNY_CLAUDE_BIN` env var overrides the claude binary path (defaults to `"claude"`). Used by tests to inject controlled behavior.
 
+## Responses API tool call IDs (do not break)
+
+The OpenAI responses API uses two distinct IDs for function calls: `item.id` (the item's own identifier, e.g. `fc_123`) and `item.call_id` (for matching function_call_output to function_call, e.g. `call_abc`). The streaming events `function_call_arguments.delta` and `.done` reference the item via `item_id`, which is `item.id` — NOT `call_id`.
+
+`parseResponsesSSE` returns both: `id` (item.id, for accumulation map keying) and `callId` (call_id, for the output block identity used in bridge tool result matching). The accumulation map keys by `id` so delta/done lookups succeed, and stores `callId` so the bridge loop's tool_call_id matching works downstream.
+
 ## Plans
 
 When asked to "make a plan", write a markdown file in `./plans/`. Do NOT use EnterPlanMode — write the plan as a file. Completed plans move to `./plans/done/`.
