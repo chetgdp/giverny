@@ -81,33 +81,20 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
                         const summary = summarizeTool(block.name, block.input);
                         ui.write(`${DIM}[${block.name}] ${summary}${RESET}\n`);
 
-                        // Show diff preview for write operations
+                        // Show diff preview for write operations (always full length)
                         if (block.name === "Edit" && block.input.old_string != null) {
                             const oldLines = block.input.old_string.split("\n");
                             const newLines = (block.input.new_string || "").split("\n");
-                            const maxLines = output === "verbose" ? Infinity : MAX_RESULT_LINES;
-                            let count = 0;
                             for (const line of oldLines) {
-                                if (count++ >= maxLines) break;
                                 ui.write(`${RED}  - ${line}${RESET}\n`);
                             }
                             for (const line of newLines) {
-                                if (count++ >= maxLines) break;
                                 ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-                            }
-                            const total = oldLines.length + newLines.length;
-                            if (total > maxLines) {
-                                ui.write(`${DIM}  ... ${total - count} more lines${RESET}\n`);
                             }
                         } else if (block.name === "Write" && block.input.content != null) {
                             const lines = block.input.content.split("\n");
-                            const maxLines = output === "verbose" ? Infinity : MAX_RESULT_LINES;
-                            const shown = lines.slice(0, maxLines);
-                            for (const line of shown) {
+                            for (const line of lines) {
                                 ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-                            }
-                            if (lines.length > maxLines) {
-                                ui.write(`${DIM}  ... ${lines.length - maxLines} more lines${RESET}\n`);
                             }
                         }
                     }

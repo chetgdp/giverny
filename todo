@@ -1,9 +1,7 @@
 ## todo next
-- point giverny at a folder of prompts, you can now pick from one of them? or point giverny at a file, that is now the prompt file?
 - hanging maybe still broke idk, keep this up here
 - [x] claude and giverny resume much better (/resume [id] claude)
     - only user messages load into resume history 
-- make normal mode output full diffs but shortened other calls
 - fix backend vs perms setup flows
 - [] general refactor
 - [] play unix commnads more for edge cases
@@ -146,3 +144,5 @@ the point is that we are testing this with claude but the real killer is a compo
     - [x] iSH repeating spinner on each newline (column width too wide?)
 - [x] escape codes appearing inside nvim `:!` mode (added DUMB mode for no tty)
 - [x] fix base system prompt for agent mode easily editable in its own file
+- [x] point giverny at a file, that is now the prompt file?
+- [x] make normal mode output full diffs but shortened other calls
