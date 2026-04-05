@@ -190,13 +190,12 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
     // Config: "default" → TOOL_SYSTEM_PROMPT, "none" → no prompt, anything else → custom.
     // Resolve system prompt: file reference → file content, inline text → as-is
     const rawPrompt = opts.systemPrompt;
-    const promptFile = rawPrompt && rawPrompt !== "none" && rawPrompt !== "default"
+    const promptFile = rawPrompt && rawPrompt !== "default"
         ? await resolvePromptFile(rawPrompt) : null;
     const resolvedPrompt = promptFile ? promptFile.content : rawPrompt;
     const systemPrompt = bridge.info.capabilities.agentLoop ? undefined
-        : resolvedPrompt === "none" ? undefined
-        : resolvedPrompt && resolvedPrompt !== "default" ? resolvedPrompt
-        : TOOL_SYSTEM_PROMPT;
+        : resolvedPrompt === "default" ? TOOL_SYSTEM_PROMPT
+        : resolvedPrompt || undefined;
 
     const bridgeResult = await bridge.run(
         {

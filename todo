@@ -2,7 +2,8 @@
 - hanging maybe still broke idk, keep this up here
 - [x] claude and giverny resume much better (/resume [id] claude)
     - only user messages load into resume history 
-- fix backend vs perms setup flows
+- [x] fix backend vs prefs setup flows, blocks other non setup words
+- [] add --local to setup flow?
 - [] general refactor
 - [] play unix commnads more for edge cases
 - [] still hanging after some toolcalls

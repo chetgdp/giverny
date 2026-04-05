@@ -16,8 +16,18 @@ import { installRcBlock } from "./rc-block";
 import { selectPrompt } from "./tui";
 
 const auto = process.argv.includes("auto");
-const setupArg = process.argv.find(a => a === "backend" || a === "prefs");
-const mode = setupArg || "full";
+const isLocal = process.argv.includes("--local") || process.argv.includes("-l");
+const setupIdx = process.argv.indexOf("--setup");
+const setupArgs = process.argv.slice(setupIdx + 1).filter(a => a !== "--local" && a !== "-l" && a !== "auto");
+const setupArg = setupArgs[0];
+
+if (setupArg && setupArg !== "backend" && setupArg !== "prefs") {
+    console.log(`  ${RED}[!!]${RESET} unknown setup mode: ${setupArg}`);
+    console.log(`  ${DIM}usage: giverny --setup [backend|prefs] [--local]${RESET}`);
+    process.exit(1);
+}
+
+const mode = (setupArg === "backend" || setupArg === "prefs") ? setupArg : "full";
 const runBackend = mode === "full" || mode === "backend";
 const runPrefs = mode === "full" || mode === "prefs";
 
@@ -84,18 +94,23 @@ end
     }
 }
 
-// ── Global config ────────────────────────────────────────────────────────── //
+// ── Config ───────────────────────────────────────────────────────────────── //
 
 const GLOBAL_CONFIG = join(GLOBAL_DIR, "config.json");
+const LOCAL_DIR = join(process.cwd(), ".giverny");
+const LOCAL_CONFIG = join(LOCAL_DIR, "config.json");
+const CONFIG_PATH = isLocal ? LOCAL_CONFIG : GLOBAL_CONFIG;
+const CONFIG_DIR = isLocal ? LOCAL_DIR : GLOBAL_DIR;
+const configLabel = isLocal ? ".giverny/config.json" : "~/.giverny/config.json";
 
 // Defaults from the single source of truth in config.ts
 const DEFAULTS = CONFIG_DEFAULTS as Record<string, any>;
 
 let config: ShellConfig = {};
 
-if (existsSync(GLOBAL_CONFIG)) {
+if (existsSync(CONFIG_PATH)) {
     try {
-        config = JSON.parse(readFileSync(GLOBAL_CONFIG, "utf-8"));
+        config = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
     } catch {}
 }
 
@@ -133,19 +148,19 @@ if (runBackend) {
 
 // --auto: write defaults (if no config exists), skip interactive prompts
 if (auto) {
-    if (!existsSync(GLOBAL_CONFIG)) {
+    if (!existsSync(CONFIG_PATH)) {
         const defaults = { prefix: DEFAULTS.prefix, model: DEFAULTS.model, effort: DEFAULTS.effort, perms: DEFAULTS.perms, output: DEFAULTS.output, session: DEFAULTS.session, backend: DEFAULTS.backend };
-        mkdirSync(GLOBAL_DIR, { recursive: true });
-        writeFileSync(GLOBAL_CONFIG, JSON.stringify(defaults, null, 2) + "\n");
-        ok(`wrote defaults to ~/.giverny/config.json`);
+        mkdirSync(CONFIG_DIR, { recursive: true });
+        writeFileSync(CONFIG_PATH, JSON.stringify(defaults, null, 2) + "\n");
+        ok(`wrote defaults to ${configLabel}`);
     } else {
-        ok(`config exists (~/.giverny/config.json)`);
+        ok(`config exists (${configLabel})`);
     }
     installAliases(config.prefix || DEFAULTS.prefix);
 } else {
 
-const headerLabel = mode === "backend" ? "backend config" : mode === "prefs" ? "preferences" : "global config";
-console.log(`\n${BOLD}${headerLabel}${RESET} ${DIM}(~/.giverny/config.json)${RESET}`);
+const headerLabel = mode === "backend" ? "backend config" : mode === "prefs" ? "preferences" : isLocal ? "local config" : "global config";
+console.log(`\n${BOLD}${headerLabel}${RESET} ${DIM}(${configLabel})${RESET}`);
 
 // Wrapper: resolve hard default from CONFIG_DEFAULTS by label name
 function prompt(label: string, options: { value: string; desc: string }[], current?: string): string {
@@ -438,15 +453,15 @@ if (runBackend) {
 
 config = { prefix, backend, model, effort, perms, output, session, backends: updatedBackends };
 
-mkdirSync(GLOBAL_DIR, { recursive: true });
-writeFileSync(GLOBAL_CONFIG, JSON.stringify(config, null, 2) + "\n");
+mkdirSync(CONFIG_DIR, { recursive: true });
+writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
 
 if (runPrefs) {
     installAliases(prefix);
 }
 
 console.log("");
-ok(`saved to ~/.giverny/config.json`);
+ok(`saved to ${configLabel}`);
 console.log(`${DIM}${JSON.stringify(config, null, 2)}${RESET}`);
 
 if (mode === "backend") {

@@ -81,7 +81,7 @@ export const CONFIG_DEFAULTS: Required<Omit<ShellConfig, "backends" | "url" | "a
     output: "normal",
     session: "keep",
     timeout: 120,
-    systemPrompt: "none",
+    systemPrompt: "",
 };
 
 

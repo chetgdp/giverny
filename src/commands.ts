@@ -425,16 +425,16 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             const firstWord = words[0].toLowerCase();
             const promptRest = words.slice(1).join(" ");
             if (firstWord === "default" || firstWord === "reset") {
-                await deleteConfigKeys(["systemPrompt"], isLocal);
+                await saveConfig({ systemPrompt: "default" }, isLocal);
                 const where = isLocal ? "local" : "global";
-                console.log(`prompt: default ${DIM}(${where} key removed)${RESET}`);
+                console.log(`prompt: default ${DIM}(${where})${RESET}`);
                 if (promptRest) return chainRemainder(promptRest, bridge);
                 return true;
             }
             if (firstWord === "none") {
-                await deleteConfigKeys(["systemPrompt"], isLocal);
+                await saveConfig({ systemPrompt: "" }, isLocal);
                 const where = isLocal ? "local" : "global";
-                console.log(`prompt: none ${DIM}(${where} key removed)${RESET}`);
+                console.log(`prompt: none ${DIM}(${where})${RESET}`);
                 if (promptRest) return chainRemainder(promptRest, bridge);
                 return true;
             }
