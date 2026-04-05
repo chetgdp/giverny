@@ -9,6 +9,7 @@ import {
     loadConfigWithSources, saveConfig, deleteConfigKeys, loadSession, loadUsage,
     loadSessions, saveSession, clearSession, loadApproved,
     discoverSessions, discoverConversations,
+    resolvePromptFile, listPromptFiles, PROMPTS_DIR,
     GIVERNY_DIR, USAGE_FILE, TRANSCRIPT_FILE,
     type ConfigSource,
 } from "./state";
@@ -396,11 +397,26 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             if (!arg) {
                 const val = cfg.systemPrompt || CONFIG_DEFAULTS.systemPrompt;
                 console.log(`prompt: ${val}${sourceTag(sources.systemPrompt)}`);
+                // Show resolved content if it's a file reference
+                const resolved = await resolvePromptFile(val);
+                if (resolved) {
+                    const preview = resolved.content.length > 60 ? resolved.content.slice(0, 60) + "…" : resolved.content;
+                    console.log(`  ${DIM}→ ${preview}${RESET}`);
+                }
                 console.log(`  default  built-in tool agent prompt`);
                 console.log(`  none     no system prompt`);
-                console.log(`  <text>   custom system prompt`);
-                console.log(`  ${DIM}only applies to completions/responses backends${RESET}`);
-                console.log(`  /prompt <value> [--local]${RESET}`);
+                console.log(`  <file>   prompt file ${DIM}(~/.giverny/prompts/ or path)${RESET}`);
+                console.log(`  <text>   inline system prompt`);
+                // List available prompt files
+                const files = listPromptFiles();
+                if (files.length > 0) {
+                    console.log(`\n${BOLD}prompts${RESET} ${DIM}(${PROMPTS_DIR})${RESET}`);
+                    for (const f of files) {
+                        const active = f === val ? ` ${BOLD}(active)${RESET}` : "";
+                        console.log(`  ${f}${active}`);
+                    }
+                }
+                console.log(`  ${DIM}/prompt <value> [--local]${RESET}`);
                 return true;
             }
             // Known single-word values can chain: `/prompt none /new hello`
@@ -416,12 +432,23 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 return true;
             }
             if (firstWord === "none") {
-                await saveConfig({ systemPrompt: "none" }, isLocal);
+                await deleteConfigKeys(["systemPrompt"], isLocal);
                 const where = isLocal ? "local" : "global";
-                console.log(`prompt: none ${DIM}(${where})${RESET}`);
+                console.log(`prompt: none ${DIM}(${where} key removed)${RESET}`);
                 if (promptRest) return chainRemainder(promptRest, bridge);
                 return true;
             }
+            // Try to resolve as a file — store the canonical name, not the content
+            const resolved = await resolvePromptFile(arg);
+            if (resolved) {
+                await saveConfig({ systemPrompt: resolved.canonicalName }, isLocal);
+                const where = isLocal ? "local" : "global";
+                const preview = resolved.content.length > 60 ? resolved.content.slice(0, 60) + "…" : resolved.content;
+                console.log(`prompt: ${resolved.canonicalName} ${DIM}(${where})${RESET}`);
+                console.log(`  ${DIM}→ ${preview}${RESET}`);
+                return true;
+            }
+            // Inline text fallback
             await saveConfig({ systemPrompt: arg }, isLocal);
             const where = isLocal ? "local" : "global";
             const display = arg.length > 60 ? arg.slice(0, 60) + "…" : arg;

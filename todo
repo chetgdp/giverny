@@ -1,4 +1,5 @@
 ## todo next
+- point giverny at a folder of prompts, you can now pick from one of them? or point giverny at a file, that is now the prompt file?
 - hanging maybe still broke idk, keep this up here
 - [x] claude and giverny resume much better (/resume [id] claude)
     - only user messages load into resume history 

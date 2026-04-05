@@ -18,7 +18,7 @@ import { Bridge } from "./bridge-loop";
 import { needsPermission, isDangerousCommand, summarizeTool, DIM, RED, ORANGE, SEA_GREEN, RESET, INV, PIPED, ui } from "./shell-utils";
 import { promptPermission } from "./tui";
 import { TOOL_SYSTEM_PROMPT } from "./tools";
-import { loadJSON, loadConfig, loadSession, saveSession, clearSession, loadUsage, saveUsage, loadApproved, saveApproved, discoverSessions, discoverConversations, GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE } from "./state";
+import { loadJSON, loadConfig, loadSession, saveSession, clearSession, loadUsage, saveUsage, loadApproved, saveApproved, discoverSessions, discoverConversations, resolvePromptFile, GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE } from "./state";
 import { createSpinner } from "./spinner";
 import { handleSlashCommand } from "./commands";
 export { handleSlashCommand };
@@ -201,9 +201,14 @@ export async function runShell(opts: RunShellOpts, sessionId: string | null, app
     // Non-agentLoop backends (completions etc.) need a system prompt —
     // agentLoop backends (claude -p) supply their own.
     // Config: "default" → TOOL_SYSTEM_PROMPT, "none" → no prompt, anything else → custom.
+    // Resolve system prompt: file reference → file content, inline text → as-is
+    const rawPrompt = opts.systemPrompt;
+    const promptFile = rawPrompt && rawPrompt !== "none" && rawPrompt !== "default"
+        ? await resolvePromptFile(rawPrompt) : null;
+    const resolvedPrompt = promptFile ? promptFile.content : rawPrompt;
     const systemPrompt = bridge.info.capabilities.agentLoop ? undefined
-        : opts.systemPrompt === "none" ? undefined
-        : opts.systemPrompt && opts.systemPrompt !== "default" ? opts.systemPrompt
+        : resolvedPrompt === "none" ? undefined
+        : resolvedPrompt && resolvedPrompt !== "default" ? resolvedPrompt
         : TOOL_SYSTEM_PROMPT;
 
     const bridgeResult = await bridge.run(

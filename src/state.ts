@@ -368,4 +368,44 @@ export async function discoverConversations(limit = 20): Promise<{ sessions: Dis
     return { sessions, total: entries.length };
 }
 
-export { claudeProjectDir };
+// Prompt file resolution -------------------------------------------------- /
+// Resolves a prompt name/path to file content.
+// Lookup order: ~/.giverny/prompts/<name> → literal file path → null (not a file)
+
+const PROMPTS_DIR = join(GLOBAL_DIR, "prompts");
+
+export interface ResolvedPrompt {
+    content: string;
+    canonicalName: string; // bare name if from global prompts dir, absolute path otherwise
+}
+
+export async function resolvePromptFile(name: string): Promise<ResolvedPrompt | null> {
+    // Skip known keywords
+    if (name === "none" || name === "default") return null;
+
+    // Check global prompts dir (bare name like "word")
+    try {
+        const content = await Bun.file(join(PROMPTS_DIR, name)).text();
+        return { content: content.trim(), canonicalName: name };
+    } catch {}
+
+    // Try as file path (absolute or cwd-relative) — always store absolute
+    try {
+        const { resolve } = await import("path");
+        const abs = resolve(name);
+        const content = await Bun.file(abs).text();
+        return { content: content.trim(), canonicalName: abs };
+    } catch {}
+
+    return null;
+}
+
+export function listPromptFiles(): string[] {
+    try {
+        return readdirSync(PROMPTS_DIR).filter(f => !f.startsWith("."));
+    } catch {
+        return [];
+    }
+}
+
+export { claudeProjectDir, PROMPTS_DIR };
