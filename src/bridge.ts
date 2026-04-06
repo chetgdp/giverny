@@ -79,7 +79,7 @@ export function buildClaudeArgs(opts: GenerateOptions): string[] {
         args.push("--system-prompt", opts.systemPrompt);
     }
 
-    if (extra.tools !== undefined) {
+    if (extra.tools !== undefined && extra.tools !== "all") {
         args.push("--tools", extra.tools);
     }
 
@@ -197,18 +197,31 @@ async function generate(
 
     // Drain stderr in background to prevent pipe buffer saturation (64KB).
     // If claude blocks on a stderr write, stdout stalls and we hang.
+    // Uses a reader (not Response) so we can cancel it — orphaned child
+    // processes inherit pipe fds and keep them open after claude exits.
     let stderrText = "";
-    const stderrDrain = new Response(proc.stderr).text()
-        .then(s => { stderrText = s; })
-        .catch(() => {});
+    const stderrReader = proc.stderr.getReader();
+    const stderrDrain = (async () => {
+        const dec = new TextDecoder();
+        const chunks: string[] = [];
+        try {
+            while (true) {
+                const { done, value } = await stderrReader.read();
+                if (done) break;
+                if (value) chunks.push(dec.decode(value, { stream: true }));
+            }
+        } catch {}
+        stderrText = chunks.join("");
+    })();
 
     const reader = proc.stdout.getReader();
 
-    // Timeout backstop: kill the process AND cancel the stdout reader.
+    // Timeout backstop: kill the process AND cancel both readers.
     // Both are needed because orphaned child processes can hold pipes open.
     const timer = setTimeout(() => {
         proc.kill(9);
         reader.cancel();
+        stderrReader.cancel();
     }, timeout);
     const decoder = new TextDecoder();
     let buffer = "";
@@ -258,6 +271,7 @@ async function generate(
     if (gotResult) {
         clearTimeout(timer);
         proc.kill(9);
+        stderrReader.cancel();
         await proc.exited;
         return { ok: true, sessionId };
     }

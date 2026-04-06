@@ -185,10 +185,12 @@ export function parseResponsesSSE(eventType: string, data: string): {
                 if (json.item?.type === "function_call") {
                     // id = item.id for accumulation (matches item_id in delta/done events)
                     // callId = call_id for output block identity (matches function_call_output)
+                    // Some implementations (actual.inc) omit item.id — fall back to call_id
+                    const itemId = json.item.id || json.item.call_id;
                     return {
                         toolCall: {
-                            id: json.item.id,
-                            callId: json.item.call_id || json.item.id,
+                            id: itemId,
+                            callId: json.item.call_id || itemId,
                             name: json.item.name,
                         },
                         completed: false,
@@ -304,6 +306,11 @@ async function generate(
                 if (line.startsWith("data: ")) {
                     const data = line.slice(6).trim();
                     if (!data || !currentEvent) continue;
+
+                    // Debug: log raw SSE events for function calls only
+                    if (currentEvent.includes("function_call")) {
+                        process.stderr.write(`[debug] SSE ${currentEvent}: ${data}\n`);
+                    }
 
                     const parsed = parseResponsesSSE(currentEvent, data);
                     currentEvent = "";

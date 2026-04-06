@@ -1,12 +1,13 @@
 ## todo next
-- hanging maybe still broke idk, keep this up here
+- [x] make bash/exec calls full length in normal output mode (safety critical)
 - [x] claude and giverny resume much better (/resume [id] claude)
     - only user messages load into resume history 
 - [x] fix backend vs prefs setup flows, blocks other non setup words
 - [x] add --local to setup flow?
 - [] general refactor
 - [] play unix commnads more for edge cases
-- [] still hanging after some toolcalls
+- [] hanging maybe
+- [] hanging after some toolcalls still broke idk, keep this up here
     - [x] drain stderr bug
     - [x] user set timeout?
     - [x] await proc.exited after kil

@@ -2,7 +2,7 @@
 /*
 * Giverny Shell Mode
 *
-*---- wrong
+*---- wrong, not just claude -p
 * Wraps `claude -p` with native Claude Code tools enabled and persistent
 * per-directory sessions. Streams output to the terminal with compact
 * tool usage summaries.
@@ -14,7 +14,6 @@
 *        giverny --tools "Read,Bash" <prompt>
 */
 
-
 // we could clean these imports up? better order?
 import { mkdirSync } from "fs";
 import { CONFIG_DEFAULTS } from "./config";
@@ -23,7 +22,7 @@ import type { BridgeEvent, RunControl } from "./backend";
 import { Bridge } from "./bridge-loop";
 import {
     DIM, RED, ORANGE, SEA_GREEN, RESET, INV, PIPED,
-    needsPermission, isDangerousCommand, summarizeTool, ui 
+    needsPermission, isDangerousCommand, summarizeTool, ui, isUUID,
 } from "./shell-utils";
 import { promptPermission } from "./tui";
 import { TOOL_SYSTEM_PROMPT } from "./tools";
@@ -37,8 +36,8 @@ import { createSpinner } from "./spinner";
 import { handleSlashCommand } from "./commands";
 export { handleSlashCommand };
 
-// what is this number
-const MAX_RESULT_LINES = 10;
+// what is this number doing here?
+const MAX_RESULT_LINES = 8;
 
 // LLM invocation via bridge ------------------------------------------------ /
 //input
@@ -69,7 +68,7 @@ interface ShellResult {
     responseText:   string;
 }
 
-// the main argument parsing function
+// the shell is doing the majority of its work here
 export async function runShell(
     opts:           RunShellOpts, 
     sessionId:      string | null, 
@@ -85,21 +84,25 @@ Promise<ShellResult> {
     // what is killed? the process?
     let killed = false;
 
-    // hmmm this is important UX but why is thinking set here?
+    // hmmm this is important UX
     const spinner = createSpinner({ effort });
+    // thinking set here because its for dumb mode non TTY mode?
     spinner.start("thinking");
     let streamedText = false;
     let responseText = "";
-    // what is an event?
+    // what is an event? also what is a block?
+    // from src/backend.ts
     const onEvent = (event: BridgeEvent, control: RunControl) => {
         // one of the ways we stop hanging?
         if (killed) return;
         // this many nested ifs now thats what I call slopus 4.6
+        
+        // ASSISTANT -------------------------------------------------------- /
         if (event.type === "assistant") {
             for (const block of event.blocks) {
                 if (killed) return;
                 if (block.type === "tool_use") {
-                    // why are we stopping the spinner here?
+                    // we stopping the spinner here because tool use
                     spinner.stop();
 
                     // Ensure tool summary starts on its own line
@@ -107,26 +110,23 @@ Promise<ShellResult> {
                         ui.write("\n");
                     }
 
-                    // why is this inside its own scope?
-                    {
-                        const summary = summarizeTool(block.name, block.input);
-                        ui.write(`${DIM}[${block.name}] ${summary}${RESET}\n`);
+                    const summary = summarizeTool(block.name, block.input);
+                    ui.write(`${DIM}[${block.name}] ${summary}${RESET}\n`);
 
-                        // Show diff preview for write operations (always full length)
-                        if (block.name === "Edit" && block.input.old_string != null) {
-                            const oldLines = block.input.old_string.split("\n");
-                            const newLines = (block.input.new_string || "").split("\n");
-                            for (const line of oldLines) {
-                                ui.write(`${RED}  - ${line}${RESET}\n`);
-                            }
-                            for (const line of newLines) {
-                                ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-                            }
-                        } else if (block.name === "Write" && block.input.content != null) {
-                            const lines = block.input.content.split("\n");
-                            for (const line of lines) {
-                                ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-                            }
+                    // Show diff preview for write operations (always full length)
+                    if (block.name === "Edit" && block.input.old_string != null) {
+                        const oldLines = block.input.old_string.split("\n");
+                        const newLines = (block.input.new_string || "").split("\n");
+                        for (const line of oldLines) {
+                            ui.write(`${RED}  - ${line}${RESET}\n`);
+                        }
+                        for (const line of newLines) {
+                            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
+                        }
+                    } else if (block.name === "Write" && block.input.content != null) {
+                        const lines = block.input.content.split("\n");
+                        for (const line of lines) {
+                            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
                         }
                     }
 
@@ -165,6 +165,8 @@ Promise<ShellResult> {
 
                 if (block.type === "text") {
                     spinner.stop();
+                    // what is the point of this ternary?
+                    //
                     const text = streamedText ? block.text : block.text.replace(/^\n+/, "");
                     process.stdout.write(text);
                     responseText += text;
@@ -173,6 +175,7 @@ Promise<ShellResult> {
             }
         }
 
+        // TOOL_USE --------------------------------------------------------- /
         if (event.type === "tool_result") {
             if (killed) return;
             spinner.stop();
@@ -200,6 +203,7 @@ Promise<ShellResult> {
             spinner.start("thinking");
         }
 
+        // RESULT ----------------------------------------------------------- /
         if (event.type === "result") {
             spinner.stop();
             if (event.isError && !killed) {
@@ -256,7 +260,6 @@ Promise<ShellResult> {
     }
 
     process.stdout.write("\n");
-
     return {
         sessionId: bridgeResult.sessionId,
         approvedTools,
@@ -268,25 +271,37 @@ Promise<ShellResult> {
     };
 }
 
-// Main --------------------------------------------------------------------- /
 
+// Main --------------------------------------------------------------------- /
+// another giga beast the main argument parsing function
 export async function main() {
-    // Argument parsing
+    // Argument parsing, remove first two: `bun run.ts`
     const argv = process.argv.slice(2);
+    // prompt becomes everything else, args[2]=text arg[3]=of arg[4]=prompt
+    // join on space to get "text of prompt" together
+    // maybe we rename prompt because, its not just a text prompt, its commands
     let prompt = argv.join(" ");
 
+    // a bit of UX magic mode
+    // does cat a | ? prompt 'a'
     // Piped stdin: `cat file | ? analyze this` or `echo data | ,`
+    // this flag tells you if the process is connected a terminal or a pipe/file
+    // true = terminal, false = pipe. so it's, if not terminal, we have a pipe
     if (!process.stdin.isTTY) {
         const piped = (await new Response(process.stdin).text()).trim();
         if (piped) {
             prompt = prompt ? `${prompt}\n\n${piped}` : piped;
         }
+    // if user is terminal cause above is true
+    // then if no prompt we go into interactive mode
+    // (no pipe, no args), safe from shell expansion
     } else if (!prompt) {
-        // Interactive mode (no pipe, no args) — safe from shell expansion
         process.stdout.write(`${DIM}interactive mode: ctrl+d to send${RESET}\n> `);
         prompt = (await new Response(process.stdin).text()).trim();
     }
-
+    
+    // if pipe stdin but empty pipe + no arguments - echo "" | ? or
+    // interactive mode and the prompt is empty
     if (!prompt) {
         const pfx = (await loadJSON<{ prefix?: string }>(GLOBAL_CONFIG_FILE, {})).prefix || CONFIG_DEFAULTS.prefix;
         console.log(`Usage: ${pfx} <prompt>    (or /help for commands)`);
@@ -295,36 +310,63 @@ export async function main() {
 
     // Load config and backend
     const cfg = await loadConfig();
-    const bridge = new Bridge(getBackend(cfg.backend || "claude-code", { protocol: cfg.protocol }));
+    console.assert(cfg.backend, "loadConfig must provide a backend");
+    console.assert(cfg.model, "loadConfig must provide a model");
+    const bridge = new Bridge(getBackend(cfg.backend, { protocol: cfg.protocol }));
 
-    // Slash command dispatch
+    // Slash command dispatch - src/commands.ts
+    // this is where we handle the command chaining
     if (prompt.startsWith("/")) {
         const result = await handleSlashCommand(prompt, bridge);
         if (result === true) process.exit(0);
         prompt = result;
     }
 
-    const model = cfg.model;
-    const effort = cfg.effort;
-    const perms = cfg.perms;
-    const tools = cfg.tools;
-    const output = cfg.output;
-    const shellOpts: RunShellOpts = { prompt, model, effort, perms, tools, output, timeout: cfg.timeout, systemPrompt: cfg.systemPrompt, url: cfg.url, apiKey: cfg.apiKey, clusterId: cfg.clusterId, bridge };
+    // seperator ---------
 
-    // Session init — detect backend/session mismatch from backend switches.
+    // now that we have processed the prompting part we can build the llm call
+    const shellOpts: RunShellOpts = { 
+        prompt,
+        model:          cfg.model,
+        effort:         cfg.effort,
+        perms:          cfg.perms,
+        tools:          cfg.tools,
+        output:         cfg.output,
+        timeout:        cfg.timeout, 
+        systemPrompt:   cfg.systemPrompt, 
+        url:            cfg.url, 
+        apiKey:         cfg.apiKey, 
+        clusterId:      cfg.clusterId, 
+        bridge 
+    };
+
+    // Session init: detect backend/session mismatch from backend switches.
     // claude-code needs UUID sessions; completions/responses use conv-* IDs.
-    const isClaudeBackend = (cfg.backend || "claude-code") === "claude-code";
-    const isUUID = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    // some flags
+    const isClaudeBackend = cfg.backend === "claude-code";
     const isFresh = cfg.session === "fresh";
     let sessionId = isFresh ? null : await loadSession();
+    // on existing session
     if (sessionId && !isFresh) {
-        const mismatch = isClaudeBackend ? !isUUID(sessionId) : isUUID(sessionId);
+        // CC expects UUID
+        const mismatch = isUUID(sessionId) != isClaudeBackend; 
+        // if we are CC then we need sessionId to be a UUID otherwise no
+        // just look at this absolutely dogwater code you get from LLM hahaha
+        // backwarsd double negative ternary assignemnt
+        //const mismatch = isClaudeBackend ? !isUUID(sessionId) : isUUID(sessionId);
         if (mismatch) {
             // Auto-recover: find the most recent session for the current backend
             const discovered = isClaudeBackend
+                // omg the sessions vs conversations jesus is rizzen save me
                 ? await discoverSessions(1)
                 : await discoverConversations(1);
+            // top one?
             const best = discovered.sessions[0];
+            // huh, im so confused, this whole mismatch block, 
+            // were having issues
+            // i mena makes sesnse to have diff CC and Giverny message history
+            // Message History is what sessions/conversations are
+            // would be best to figure out how to do proper CC <-> Giverny integration
             if (best) {
                 sessionId = best.id;
                 await saveSession(best.id);
@@ -334,13 +376,20 @@ export async function main() {
             }
         }
     }
+
+    // src/state.ts
     let approvedTools = await loadApproved();
 
+    // responseText key, local interface for printing
     let result: ShellResult;
+    
+    // the core data transformation starts here
+    // we process and back the prompt, then hand it off
     try {
         result = await runShell(shellOpts, sessionId, approvedTools);
     } catch (e: any) {
         // If resume failed, retry without session
+        // as in resume session
         if (sessionId && e.message?.includes("error")) {
             await clearSession();
             result = await runShell(shellOpts, null, new Set());
@@ -350,7 +399,9 @@ export async function main() {
         }
     }
 
-    // Always preserve session and approved tools — denying one tool call
+    // another source of pain
+    // what if we did tree sessions as our core?
+    // Always preserve session and approved tools, denying one tool call
     // shouldn't destroy context. Null checks protect against partial state.
     if (!isFresh && result.sessionId) {
         await saveSession(result.sessionId);
@@ -358,7 +409,7 @@ export async function main() {
     if (result.approvedTools.size > 0) await saveApproved(result.approvedTools);
 
     if (!result.killed) {
-        // Append to transcript (skip on kill — response may be mid-sentence)
+        // Append to transcript (skip on kill, response may be mid-sentence)
         if (result.responseText) {
             const { appendFileSync } = await import("fs");
             mkdirSync(GIVERNY_DIR, { recursive: true });

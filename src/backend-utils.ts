@@ -4,6 +4,7 @@
 // extraction, block building, status checks, and model probing.
 
 import type { BackendInfo, ContentBlock } from "./backend";
+import { log } from "./config";
 
 export const DEFAULT_URL = "http://localhost:8080";
 
@@ -79,9 +80,18 @@ export function buildBlocksFromAccumulated(
             blocks.push({ type: "text", text: fullText });
         }
 
-        for (const [, tc] of toolCallAccum) {
+        for (const [key, tc] of toolCallAccum) {
+            process.stderr.write(`[debug] tool_call[${key}] name=${tc.name} id=${tc.id} args=${JSON.stringify(tc.arguments)}\n`);
             let input: Record<string, any> = {};
-            try { input = JSON.parse(tc.arguments); } catch {}
+            try {
+                input = JSON.parse(tc.arguments);
+            } catch {
+                // Local models often produce malformed JSON arguments.
+                // If this is an exec call, treat the raw string as the command.
+                if (tc.name === "exec" && tc.arguments.trim()) {
+                    input = { command: tc.arguments.trim() };
+                }
+            }
             blocks.push({
                 type: "tool_use",
                 id: tc.id,

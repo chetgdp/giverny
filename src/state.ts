@@ -79,7 +79,7 @@ function resolveBackendConfig(cfg: ShellConfig): ShellConfig {
 export const loadConfig = async (): Promise<ShellConfig> => {
     const global = await loadJSON<ShellConfig>(GLOBAL_CONFIG_FILE, {});
     const local = await loadJSON<ShellConfig>(CONFIG_FILE, {});
-    return resolveBackendConfig({ ...global, ...local });
+    return { ...CONFIG_DEFAULTS, ...resolveBackendConfig({ ...global, ...local }) };
 };
 
 export const loadConfigWithSources = async (): Promise<ConfigWithSources> => {

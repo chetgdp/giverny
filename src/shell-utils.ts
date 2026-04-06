@@ -6,7 +6,6 @@
 */
 
 // Permission mode aliases -------------------------------------------------- /
-
 export function normalizePerms(mode: string): string {
     if (mode === "auto" || mode === "bypass" || mode === "bypassPermissions") return "auto";
     if (mode === "confirm" || mode === "strict") return "confirm";
@@ -15,10 +14,14 @@ export function normalizePerms(mode: string): string {
     return mode;
 }
 
+// UUID helper
+export function isUUID(id: string) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+} 
+
 // Permission check --------------------------------------------------------- /
 // Safe tools auto-approve in ask mode; everything else prompts.
 // Bash gets heuristic checkingread-only commands pass through.
-
 const SAFE_TOOLS = new Set(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "LSP"]);
 
 // Read-only command binariesno side effects, no writes
@@ -87,7 +90,6 @@ export function needsPermission(toolName: string, input?: Record<string, any>): 
 // Danger detection --------------------------------------------------------- /
 // Extra confirmation for catastrophically destructive commands.
 // Returns a warning string or null.
-
 export function isDangerousCommand(command: string): string | null {
     // rm with recursive flag (-r, -rf, -fr, --recursive) on dangerous paths
     if (/\brm\b/.test(command) && (/\s-\w*r|--recursive/.test(command))) {
@@ -119,7 +121,6 @@ export function isDangerousCommand(command: string): string | null {
 
 // Terminal display width ---------------------------------------------------- /
 // Approximates wcwidth for column-aware rendering (kaomoji contain CJK/fullwidth chars).
-
 export function displayWidth(s: string): number {
     let w = 0;
     for (const ch of s) {
@@ -145,7 +146,6 @@ export function displayWidth(s: string): number {
 }
 
 // Token formatting --------------------------------------------------------- /
-
 export function formatTokens(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}m`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
@@ -153,10 +153,9 @@ export function formatTokens(n: number): string {
 }
 
 // Tool summary ------------------------------------------------------------- /
-
 export const TOOL_SUMMARIES: Record<string, (input: any) => string> = {
-    Bash: (i) => i.command?.slice(0, 80) || "",
-    exec: (i) => i.command?.slice(0, 80) || "",
+    Bash: (i) => i.command || "",
+    exec: (i) => i.command || "",
     Read: (i) => i.file_path || "",
     Write: (i) => i.file_path || "",
     Edit: (i) => i.file_path || "",
@@ -175,7 +174,6 @@ export function summarizeTool(name: string, input: any): string {
 // stderr so the pipe gets clean text only.
 // DUMB = neither stdout nor stderr is a TTY (e.g. nvim :! mode).
 // In dumb mode, all ANSI formatting is suppressed.
-
 export const PIPED = !process.stdout.isTTY;
 export const DUMB = !process.stdout.isTTY && !process.stderr.isTTY;
 export const ui = PIPED ? process.stderr : process.stdout;
@@ -183,7 +181,6 @@ export const ui = PIPED ? process.stderr : process.stdout;
 // ANSI constants ----------------------------------------------------------- /
 // Suppressed in dumb mode (nvim :!) — truecolor/256 escapes render as raw text.
 // The color you see in :! is nvim's stderr highlighting, not ours.
-
 export const DIM = DUMB ? "" : "\x1b[2m";
 export const RED = DUMB ? "" : "\x1b[31m";
 export const GREEN = DUMB ? "" : "\x1b[32m";
@@ -194,4 +191,3 @@ export const SEA_GREEN = DUMB ? "" : "\x1b[38;5;43m";
 export const BLUE = DUMB ? "" : "\x1b[38;5;75m";
 export const RESET = DUMB ? "" : "\x1b[0m";
 export const INV = DUMB ? "" : "\x1b[7m";
-
