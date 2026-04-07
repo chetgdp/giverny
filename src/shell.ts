@@ -2,59 +2,54 @@
 /*
 * Giverny Shell Mode
 *
-*---- wrong, not just claude -p
-* Wraps `claude -p` with native Claude Code tools enabled and persistent
-* per-directory sessions. Streams output to the terminal with compact
-* tool usage summaries.
-*----
 * The shell mode is one end of the bridge, this is the main UX of giverny
-* we have shell <-> bridge <-> backend apis <-> models
+* we have shell <-> bridge <-> backend apis <-> models. 
+* Streams output to the terminal with compact tool usage summaries.
 *
 * Usage: giverny <prompt>
 *        giverny --tools "Read,Bash" <prompt>
 */
 
-// we could clean these imports up? better order?
-import { mkdirSync } from "fs";
-import { CONFIG_DEFAULTS } from "./config";
-import { getBackend } from "./backend";
+// node.js
+import { mkdirSync, appendFileSync} from "fs";
+// local
 import type { BridgeEvent, RunControl } from "./backend";
+import { getBackend } from "./backend";
 import { Bridge } from "./bridge-loop";
+import { handleSlashCommand } from "./commands";
+import { CONFIG_DEFAULTS, type ShellConfig } from "./config";
+import { createSpinner } from "./spinner";
 import {
     DIM, RED, ORANGE, SEA_GREEN, RESET, INV, PIPED,
     needsPermission, isDangerousCommand, summarizeTool, ui, isUUID,
 } from "./shell-utils";
-import { promptPermission } from "./tui";
-import { TOOL_SYSTEM_PROMPT } from "./tools";
-import { 
+import {
     GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE,
-    loadJSON, loadConfig, loadSession, loadApproved, loadUsage, 
-    saveSession, saveUsage, saveApproved, clearSession, 
-    discoverSessions, discoverConversations, resolvePromptFile  
+    loadJSON, loadConfig, loadSession, loadApproved, loadUsage,
+    saveSession, saveUsage, saveApproved, clearSession,
+    discoverSessions, discoverConversations, resolvePromptFile
 } from "./state";
-import { createSpinner } from "./spinner";
-import { handleSlashCommand } from "./commands";
+import { TOOL_SYSTEM_PROMPT } from "./tools";
+import { promptPermission } from "./tui";
 export { handleSlashCommand };
 
-// what is this number doing here?
+// tool result output cap in normal mode (verbose shows all)
 const MAX_RESULT_LINES = 8;
 
 // LLM invocation via bridge ------------------------------------------------ /
 //input
 export interface RunShellOpts {
     prompt:         string;
-    model:          string;
-    effort:         string;
-    perms:          string;
-    tools:          string;
-    output:         string;
-    timeout?:       number;
-    systemPrompt?:  string;
-    url?:           string;
-    apiKey?:        string;
-    clusterId?:     string;
-    // why is this an option? (opts?)
-    bridge:         Bridge;
+//    model:          string;
+//    effort:         string;
+//    perms:          string;
+//    tools:          string;
+//    output:         string;
+//    timeout?:       number;
+//    systemPrompt?:  string;
+//    url?:           string;
+//    apiKey?:        string;
+//    clusterId?:     string;
 }
 
 //output
@@ -70,14 +65,16 @@ interface ShellResult {
 
 // the shell is doing the majority of its work here
 export async function runShell(
-    opts:           RunShellOpts, 
-    sessionId:      string | null, 
-    approvedTools:  Set<string>, 
-    overridePerms?: string): 
+    prompt:         string,
+    bridge:         Bridge,
+    cfg:            ShellConfig,
+    sessionId:      string | null,
+    approvedTools:  Set<string>,
+    overridePerms?: string):
 Promise<ShellResult> {
-    // where does this come from?
-    const { prompt, model, effort, perms, tools, 
-        output, url, apiKey, clusterId, bridge } = opts;
+    // just use cfg.model?
+    const { model, effort, perms, tools,
+        output, url, apiKey, clusterId } = cfg;
     const effectivePerms = overridePerms || perms;
     const isAskMode = effectivePerms === "ask";
     const isConfirmMode = effectivePerms === "confirm";
@@ -224,7 +221,7 @@ Promise<ShellResult> {
     // agentLoop backends (claude -p) supply their own.
     // Config: "default" → TOOL_SYSTEM_PROMPT, "none" → no prompt, anything else → custom.
     // Resolve system prompt: file reference → file content, inline text → as-is
-    const rawPrompt = opts.systemPrompt;
+    const rawPrompt = cfg.systemPrompt;
     const promptFile = rawPrompt && rawPrompt !== "default"
         ? await resolvePromptFile(rawPrompt) : null;
     const resolvedPrompt = promptFile ? promptFile.content : rawPrompt;
@@ -238,7 +235,7 @@ Promise<ShellResult> {
             model,
             systemPrompt,
             sessionId: sessionId || undefined,
-            timeout: opts.timeout ? opts.timeout * 1000 : undefined,
+            timeout: cfg.timeout ? cfg.timeout * 1000 : undefined,
             options: {
                 effort,
                 perms: (isAskMode || isConfirmMode) ? "auto" : effectivePerms,
@@ -271,17 +268,7 @@ Promise<ShellResult> {
     };
 }
 
-
-// Main --------------------------------------------------------------------- /
-// another giga beast the main argument parsing function
-export async function main() {
-    // Argument parsing, remove first two: `bun run.ts`
-    const argv = process.argv.slice(2);
-    // prompt becomes everything else, args[2]=text arg[3]=of arg[4]=prompt
-    // join on space to get "text of prompt" together
-    // maybe we rename prompt because, its not just a text prompt, its commands
-    let prompt = argv.join(" ");
-
+async function resolveInput(prompt: string) {
     // a bit of UX magic mode
     // does cat a | ? prompt 'a'
     // Piped stdin: `cat file | ? analyze this` or `echo data | ,`
@@ -299,7 +286,7 @@ export async function main() {
         process.stdout.write(`${DIM}interactive mode: ctrl+d to send${RESET}\n> `);
         prompt = (await new Response(process.stdin).text()).trim();
     }
-    
+
     // if pipe stdin but empty pipe + no arguments - echo "" | ? or
     // interactive mode and the prompt is empty
     if (!prompt) {
@@ -308,38 +295,11 @@ export async function main() {
         process.exit(0);
     }
 
-    // Load config and backend
-    const cfg = await loadConfig();
-    console.assert(cfg.backend, "loadConfig must provide a backend");
-    console.assert(cfg.model, "loadConfig must provide a model");
-    const bridge = new Bridge(getBackend(cfg.backend, { protocol: cfg.protocol }));
+    return prompt;
+}
 
-    // Slash command dispatch - src/commands.ts
-    // this is where we handle the command chaining
-    if (prompt.startsWith("/")) {
-        const result = await handleSlashCommand(prompt, bridge);
-        if (result === true) process.exit(0);
-        prompt = result;
-    }
-
-    // seperator ---------
-
-    // now that we have processed the prompting part we can build the llm call
-    const shellOpts: RunShellOpts = { 
-        prompt,
-        model:          cfg.model,
-        effort:         cfg.effort,
-        perms:          cfg.perms,
-        tools:          cfg.tools,
-        output:         cfg.output,
-        timeout:        cfg.timeout, 
-        systemPrompt:   cfg.systemPrompt, 
-        url:            cfg.url, 
-        apiKey:         cfg.apiKey, 
-        clusterId:      cfg.clusterId, 
-        bridge 
-    };
-
+// what does this return?
+async function resolveSession(cfg: ShellConfig) {
     // Session init: detect backend/session mismatch from backend switches.
     // claude-code needs UUID sessions; completions/responses use conv-* IDs.
     // some flags
@@ -352,8 +312,8 @@ export async function main() {
         const mismatch = isUUID(sessionId) != isClaudeBackend; 
         // if we are CC then we need sessionId to be a UUID otherwise no
         // just look at this absolutely dogwater code you get from LLM hahaha
-        // backwarsd double negative ternary assignemnt
-        //const mismatch = isClaudeBackend ? !isUUID(sessionId) : isUUID(sessionId);
+        // backwarsd double negative ternary assignemnt LOL
+        //const mismatch=isClaudeBackend ? !isUUID(sessionId) : isUUID(sessionId);
         if (mismatch) {
             // Auto-recover: find the most recent session for the current backend
             const discovered = isClaudeBackend
@@ -377,28 +337,23 @@ export async function main() {
         }
     }
 
-    // src/state.ts
-    let approvedTools = await loadApproved();
+    return { sessionId, isFresh };
 
-    // responseText key, local interface for printing
-    let result: ShellResult;
-    
-    // the core data transformation starts here
-    // we process and back the prompt, then hand it off
-    try {
-        result = await runShell(shellOpts, sessionId, approvedTools);
-    } catch (e: any) {
-        // If resume failed, retry without session
-        // as in resume session
-        if (sessionId && e.message?.includes("error")) {
-            await clearSession();
-            result = await runShell(shellOpts, null, new Set());
-        } else {
-            process.stderr.write(`Error: ${e.message}\n`);
-            process.exit(1);
-        }
-    }
+}
+            
+function appendToTranscript(prompt: string, text: string) {
+    appendFileSync(
+        TRANSCRIPT_FILE, 
+        `<|user|>\n${prompt}\n<|end|>\n<|assistant|>\n${text}\n<|end|>\n`
+    );
+}
 
+async function resultPersistence(
+    result: ShellResult, 
+    prompt: string, 
+    isFresh: boolean) 
+{
+    // saving sessions
     // another source of pain
     // what if we did tree sessions as our core?
     // Always preserve session and approved tools, denying one tool call
@@ -406,14 +361,19 @@ export async function main() {
     if (!isFresh && result.sessionId) {
         await saveSession(result.sessionId);
     }
+
+    // tools perms when user says yes to a too
+    // why check if 0
     if (result.approvedTools.size > 0) await saveApproved(result.approvedTools);
+    // maybe the above two could go in here?
 
     if (!result.killed) {
         // Append to transcript (skip on kill, response may be mid-sentence)
         if (result.responseText) {
-            const { appendFileSync } = await import("fs");
+            const text = result.responseText.trim();
             mkdirSync(GIVERNY_DIR, { recursive: true });
-            appendFileSync(TRANSCRIPT_FILE, `<|user|>\n${prompt}\n<|end|>\n<|assistant|>\n${result.responseText.trim()}\n<|end|>\n`);
+            // this we can change
+            appendToTranscript(prompt, text);
         }
 
         // Accumulate session usage
@@ -427,8 +387,68 @@ export async function main() {
             });
         }
     }
+}
 
-    process.stdout.write("\n");
+
+// Main --------------------------------------------------------------------- /
+// another giga beast the main argument parsing function
+export async function main() {
+    // Argument parsing, remove first two: `bun run.ts`
+    const argv = process.argv.slice(2);
+    // prompt becomes everything else, args[2]=text arg[3]=of arg[4]=prompt
+    // join on space to get "text of prompt" together
+    // maybe we rename prompt because, its not just a text prompt, its commands
+    let input = argv.join(" ");
+    // prompt = argv.join(" ").resolve() some kind of self operating syntax?
+    let prompt = await resolveInput(input);
+    
+    // Load config and backend
+    // need to assert that the config is valid
+    const cfg = await loadConfig();
+    console.assert(cfg.backend, "loadConfig must provide a backend");
+    console.assert(cfg.model, "loadConfig must provide a model");
+    const bridge = new Bridge(getBackend(cfg.backend, { protocol: cfg.protocol }));
+    // assert bridge exists
+
+    // Slash command dispatch - src/commands.ts
+    // this is where we handle the command chaining
+    // prompt is changed!
+    if (prompt.startsWith("/")) {
+        const result = await handleSlashCommand(prompt, bridge);
+        if (result === true) process.exit(0);
+        prompt = result;
+    }
+    
+    // now that we have processed the prompting part we can build the llm call
+    // get session state
+    let { sessionId, isFresh } = await resolveSession(cfg);
+
+    // get tool whitelist src/state.ts
+    let approvedTools = await loadApproved();
+
+    // the core data transformation starts here
+    // we process and back the prompt, then hand it off
+    // responseText key, local interface for printing
+    let result: ShellResult;
+    try {
+        result = await runShell(prompt, bridge, cfg, sessionId, approvedTools);
+    } catch (e: any) {
+        // If resume failed, retry without session; as in resume session
+        if (sessionId && e.message?.includes("error")) {
+            await clearSession();
+            result = await runShell(prompt, bridge, cfg, null, approvedTools);
+        } else {
+            process.stderr.write(`Error: ${e.message}\n`);
+            process.exit(1);
+        }
+    }
+
+    // do stuff with the result, save session, tool perms, transcript, usage
+    await resultPersistence(result, prompt, isFresh);
+
+    // a two liner is nice for visual distinction
+    // only fires when the end is clean text
+    process.stdout.write("\n\n");
 }
 
 if (import.meta.main) main();
