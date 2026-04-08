@@ -2,7 +2,7 @@
 // run.ts
 /*
 * Giverny entry point.
-* Routes --server, --setup, --help to the appropriate module.
+* Routes --server, --setup, --uninstall, --help, or default to the appropriate module.
 * Bare `giverny` launches the interactive shell program.
 */
 
