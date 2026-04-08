@@ -43,7 +43,12 @@ function registerProject(projectDir: string) {
 
 // File paths ---------------------------------------------------------------- /
 export const GLOBAL_CONFIG_FILE = join(GLOBAL_DIR, "config.json");
-export const GIVERNY_DIR = join(process.cwd(), ".giverny");
+// Fall back to GLOBAL_DIR when cwd is "/" — prevents EACCES on /.giverny
+// when giverny is launched from a non-project directory (e.g., cwd was deleted,
+// or run from systemd/cron with default cwd of /).
+export const GIVERNY_DIR = process.cwd() === "/"
+    ? GLOBAL_DIR
+    : join(process.cwd(), ".giverny");
 const APPROVED_FILE = join(GIVERNY_DIR, "approved");
 const CONFIG_FILE = join(GIVERNY_DIR, "config.json");
 export const USAGE_FILE = join(GIVERNY_DIR, "usage.json");

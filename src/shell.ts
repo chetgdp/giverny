@@ -13,7 +13,7 @@
 // node.js
 import { mkdirSync, appendFileSync} from "fs";
 // local
-import type { BridgeEvent, RunControl } from "./backend";
+import type { BridgeEvent, RunControl, ToolUseBlock } from "./backend";
 import { getBackend } from "./backend";
 import { Bridge } from "./bridge-loop";
 import { handleSlashCommand } from "./commands";
@@ -37,6 +37,7 @@ export { handleSlashCommand };
 const MAX_RESULT_LINES = 8;
 
 // LLM invocation via bridge ------------------------------------------------ /
+
 //input
 export interface RunShellOpts {
     prompt:         string;
@@ -61,6 +62,83 @@ interface ShellResult {
     durationMs:     number | null;
     numTurns:       number;
     responseText:   string;
+}
+
+async function resolveSystemPrompt(cfg: ShellConfig, bridge: Bridge) {
+    // In ask mode, we bypass the backend's permission system (which can only
+    // deny in -p mode) and handle permissions ourselves via pause/resume.
+    // Non-agentLoop backends (completions etc.) need a system prompt —
+    // agentLoop backends (claude -p) supply their own.
+    // Config: "default" → TOOL_SYSTEM_PROMPT, "none" → no prompt, anything else → custom.
+    // Resolve system prompt: file reference → file content, inline text → as-is
+    const rawPrompt = cfg.systemPrompt;
+    const promptFile = rawPrompt && rawPrompt !== "default"
+        ? await resolvePromptFile(rawPrompt) : null;
+    const resolvedPrompt = promptFile ? promptFile.content : rawPrompt;
+    const systemPrompt = bridge.info.capabilities.agentLoop ? undefined
+        : resolvedPrompt === "default" ? TOOL_SYSTEM_PROMPT
+        : resolvedPrompt || undefined;
+
+    return systemPrompt;
+}
+
+// Show diff preview for write operations (always full length)
+function diffPreviewRender(block: ToolUseBlock) {
+    if (block.name === "Edit" && block.input.old_string != null) {
+        const oldLines = block.input.old_string.split("\n");
+        const newLines = (block.input.new_string || "").split("\n");
+        for (const line of oldLines) {
+            ui.write(`${RED}  - ${line}${RESET}\n`);
+        }
+        for (const line of newLines) {
+            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
+        }
+    } else if (block.name === "Write" && block.input.content != null) {
+        const lines = block.input.content.split("\n");
+        for (const line of lines) {
+            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
+        }
+    }
+}
+
+function checkPermissions(
+    block: ToolUseBlock,
+    mode: "ask" | "confirm" | string,
+    approvedTools: Set<string>,
+    control: RunControl,
+): boolean {
+    // Ask mode: pause before dangerous tools, prompt user
+    // Confirm mode: pause before ALL tools, no safe-list bypass
+    // dont like this style but ok chage it later
+    const isAskMode = mode === "ask";
+    const isConfirmMode = mode === "confirm";
+    if ((isAskMode || isConfirmMode) 
+        && !approvedTools.has(block.name) 
+        && (isConfirmMode || needsPermission(block.name, block.input))) {
+        
+        control.pause?.();
+
+        // Extra warning for catastrophic commands — flips default to deny
+        const danger = block.name === "Bash"
+            ? isDangerousCommand(block.input?.command || "")
+            : null;
+        if (danger) {
+            ui.write(`  ${RED}⚠ ${danger}${RESET}\n`);
+        }
+
+        const choice = promptPermission(block.name, !!danger);
+        if (choice === "tool") {
+            approvedTools.add(block.name);
+            control.resume?.();
+        } else if (choice === "allow") {
+            control.resume?.();
+        } else {
+            control.abort();
+            return false;
+        }
+        return true;
+    }
+    return true;
 }
 
 // the shell is doing the majority of its work here
@@ -110,47 +188,11 @@ Promise<ShellResult> {
                     const summary = summarizeTool(block.name, block.input);
                     ui.write(`${DIM}[${block.name}] ${summary}${RESET}\n`);
 
-                    // Show diff preview for write operations (always full length)
-                    if (block.name === "Edit" && block.input.old_string != null) {
-                        const oldLines = block.input.old_string.split("\n");
-                        const newLines = (block.input.new_string || "").split("\n");
-                        for (const line of oldLines) {
-                            ui.write(`${RED}  - ${line}${RESET}\n`);
-                        }
-                        for (const line of newLines) {
-                            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-                        }
-                    } else if (block.name === "Write" && block.input.content != null) {
-                        const lines = block.input.content.split("\n");
-                        for (const line of lines) {
-                            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-                        }
-                    }
+                    diffPreviewRender(block);
 
-                    // Ask mode: pause before dangerous tools, prompt user
-                    // Confirm mode: pause before ALL tools, no safe-list bypass
-                    if ((isAskMode || isConfirmMode) && !approvedTools.has(block.name) && (isConfirmMode || needsPermission(block.name, block.input))) {
-                        control.pause?.();
-
-                        // Extra warning for catastrophic commands — flips default to deny
-                        const danger = block.name === "Bash"
-                            ? isDangerousCommand(block.input?.command || "")
-                            : null;
-                        if (danger) {
-                            ui.write(`  ${RED}⚠ ${danger}${RESET}\n`);
-                        }
-
-                        const choice = promptPermission(block.name, !!danger);
-                        if (choice === "tool") {
-                            approvedTools.add(block.name);
-                            control.resume?.();
-                        } else if (choice === "allow") {
-                            control.resume?.();
-                        } else {
-                            killed = true;
-                            control.abort();
-                            return;
-                        }
+                    if (!checkPermissions(block, effectivePerms, approvedTools, control)) {
+                        killed = true;
+                        return;
                     }
 
                     // Show tool execution in spinner
@@ -215,19 +257,7 @@ Promise<ShellResult> {
         }
     };
 
-    // In ask mode, we bypass the backend's permission system (which can only
-    // deny in -p mode) and handle permissions ourselves via pause/resume.
-    // Non-agentLoop backends (completions etc.) need a system prompt —
-    // agentLoop backends (claude -p) supply their own.
-    // Config: "default" → TOOL_SYSTEM_PROMPT, "none" → no prompt, anything else → custom.
-    // Resolve system prompt: file reference → file content, inline text → as-is
-    const rawPrompt = cfg.systemPrompt;
-    const promptFile = rawPrompt && rawPrompt !== "default"
-        ? await resolvePromptFile(rawPrompt) : null;
-    const resolvedPrompt = promptFile ? promptFile.content : rawPrompt;
-    const systemPrompt = bridge.info.capabilities.agentLoop ? undefined
-        : resolvedPrompt === "default" ? TOOL_SYSTEM_PROMPT
-        : resolvedPrompt || undefined;
+    let systemPrompt = await resolveSystemPrompt(cfg, bridge);
 
     const bridgeResult = await bridge.run(
         {
