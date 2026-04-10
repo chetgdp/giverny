@@ -89,7 +89,10 @@ So far I have barely written any lines of this project over the course of 10 day
 
 Now time to go into the mines and actually read it. A step that is quite rare
 
+##
+i get bash being old and sucky. what i dontagree with is building elaborate abstraction towers ontop of javascript vm as a way to avoid the real work that needs to happen. OS level redesign from the ground up.
 
+Unix was designed in 1969 for a world where the user was the intelligent agent and the machine was the dumb executor. thats still the case, except the user can now be a machine with a degree of intelligence too
 
 ---
 

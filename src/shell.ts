@@ -13,7 +13,7 @@
 // node.js
 import { mkdirSync, appendFileSync} from "fs";
 // local
-import type { BridgeEvent, RunControl, ToolUseBlock } from "./backend";
+import type { BridgeEvent, RunControl, ToolUseBlock, AssistantEvent, ResultEvent, ToolResultEvent } from "./backend";
 import { getBackend } from "./backend";
 import { Bridge } from "./bridge-loop";
 import { handleSlashCommand } from "./commands";
@@ -37,21 +37,6 @@ export { handleSlashCommand };
 const MAX_RESULT_LINES = 8;
 
 // LLM invocation via bridge ------------------------------------------------ /
-
-//input
-export interface RunShellOpts {
-    prompt:         string;
-//    model:          string;
-//    effort:         string;
-//    perms:          string;
-//    tools:          string;
-//    output:         string;
-//    timeout?:       number;
-//    systemPrompt?:  string;
-//    url?:           string;
-//    apiKey?:        string;
-//    clusterId?:     string;
-}
 
 //output
 interface ShellResult {
@@ -141,6 +126,122 @@ function checkPermissions(
     return true;
 }
 
+// Event handler for shell mode — owns the mutable display state
+// across a single runShell call.
+class ShellEventHandler {
+    // what is killed? the process?
+    killed = false;
+    streamedText = false;
+    responseText = "";
+
+    constructor(
+        private spinner: ReturnType<typeof createSpinner>,
+        private effectivePerms: string,
+        private approvedTools: Set<string>,
+        private output: string,
+    ) {}
+
+    // ASSISTANT ------------------------------------------------------------ /
+    onAssistant(event: AssistantEvent, control: RunControl) {
+        for (const block of event.blocks) {
+            if (this.killed) return;
+            if (block.type === "tool_use") {
+                // we stopping the spinner here because tool use
+                this.spinner.stop();
+
+                // Ensure tool summary starts on its own line
+                if (this.streamedText && !this.responseText.endsWith("\n")) {
+                    ui.write("\n");
+                }
+
+                const summary = summarizeTool(block.name, block.input);
+                ui.write(`${DIM}[${block.name}] ${summary}${RESET}\n`);
+
+                diffPreviewRender(block);
+
+                if (!checkPermissions(
+                    block, this.effectivePerms, this.approvedTools, control)) {
+                    this.killed = true;
+                    return;
+                }
+
+                // Show tool execution in spinner
+                if (!this.killed) {
+                    this.spinner.start(block.name);
+                }
+            }
+
+            if (block.type === "text") {
+                this.spinner.stop();
+                // what is the point of this ternary?
+                const text = this.streamedText 
+                    ? block.text 
+                    : block.text.replace(/^\n+/, "");
+                process.stdout.write("\n");
+                process.stdout.write(text);
+                this.responseText += text;
+                this.streamedText = true;
+            }
+        }
+    }
+
+    // TOOL RESULT ---------------------------------------------------------- /
+    onToolResult(event: ToolResultEvent) {
+        if (this.killed) return;
+        this.spinner.stop();
+
+        if (this.output === "normal" || this.output === "verbose") {
+            const toolOutput = event.stdout || event.content;
+            if (toolOutput) {
+                const color = event.isError ? RED : DIM;
+                const lines = toolOutput.split("\n");
+                const maxLines = 
+                    this.output === "verbose" ? Infinity : MAX_RESULT_LINES;
+                const shown = lines.slice(0, maxLines);
+                for (const line of shown) {
+                    ui.write(`${color}  ${line}${RESET}\n`);
+                }
+                if (lines.length > maxLines) {
+                    ui.write(
+            `${color}  ... ${lines.length - maxLines} more lines${RESET}\n`);
+                }
+            }
+        }
+        if (event.stderr) {
+            ui.write(`${RED}  ${event.stderr.trim()}${RESET}\n`);
+        }
+
+        // Claude processes the result next
+        this.spinner.start("thinking");
+    }
+
+    // RESULT --------------------------------------------------------------- /
+    onResult(event: ResultEvent) {
+        this.spinner.stop();
+        if (event.isError && !this.killed) {
+            process.stderr.write(`Error: ${event.result || "unknown"}\n`);
+            process.exit(1);
+        }
+        // Print result text if we haven't streamed content yet
+        if (!this.streamedText && event.result && !this.killed) {
+            process.stdout.write("\n");
+            process.stdout.write(event.result);
+            this.responseText = event.result;
+        }
+    }
+
+    // Dispatch, what is an event? see src/backend.ts
+    handle(event: BridgeEvent, control: RunControl) {
+        // one of the ways we stop hanging?
+        if (this.killed) return;
+        switch (event.type) {
+            case "assistant":   this.onAssistant(event, control); break;
+            case "tool_result": this.onToolResult(event);         break;
+            case "result":      this.onResult(event);             break;
+        }
+    }
+}
+
 // the shell is doing the majority of its work here
 export async function runShell(
     prompt:         string,
@@ -154,111 +255,24 @@ Promise<ShellResult> {
     const { model, effort, perms, tools,
         output, url, apiKey, clusterId } = cfg;
     const effectivePerms = overridePerms || perms;
-    const isAskMode = effectivePerms === "ask";
-    const isConfirmMode = effectivePerms === "confirm";
-    // what is killed? the process?
-    let killed = false;
 
     // hmmm this is important UX
     const spinner = createSpinner({ effort });
     // thinking set here because its for dumb mode non TTY mode?
     spinner.start("thinking");
-    let streamedText = false;
-    let responseText = "";
-    // what is an event? also what is a block?
-    // from src/backend.ts
+
+    const handler = 
+        new ShellEventHandler(spinner, effectivePerms, approvedTools, output);
+
     const onEvent = (event: BridgeEvent, control: RunControl) => {
-        // one of the ways we stop hanging?
-        if (killed) return;
-        // this many nested ifs now thats what I call slopus 4.6
-        
-        // ASSISTANT -------------------------------------------------------- /
-        if (event.type === "assistant") {
-            for (const block of event.blocks) {
-                if (killed) return;
-                if (block.type === "tool_use") {
-                    // we stopping the spinner here because tool use
-                    spinner.stop();
-
-                    // Ensure tool summary starts on its own line
-                    if (streamedText && !responseText.endsWith("\n")) {
-                        ui.write("\n");
-                    }
-
-                    const summary = summarizeTool(block.name, block.input);
-                    ui.write(`${DIM}[${block.name}] ${summary}${RESET}\n`);
-
-                    diffPreviewRender(block);
-
-                    if (!checkPermissions(block, effectivePerms, approvedTools, control)) {
-                        killed = true;
-                        return;
-                    }
-
-                    // Show tool execution in spinner
-                    if (!killed) {
-                        const label = block.name;
-                        spinner.start(label);
-                    }
-                }
-
-                if (block.type === "text") {
-                    spinner.stop();
-                    // what is the point of this ternary?
-                    //
-                    const text = streamedText ? block.text : block.text.replace(/^\n+/, "");
-                    process.stdout.write(text);
-                    responseText += text;
-                    streamedText = true;
-                }
-            }
-        }
-
-        // TOOL_USE --------------------------------------------------------- /
-        if (event.type === "tool_result") {
-            if (killed) return;
-            spinner.stop();
-
-            if (output === "normal" || output === "verbose") {
-                const toolOutput = event.stdout || event.content;
-                if (toolOutput) {
-                    const color = event.isError ? RED : DIM;
-                    const lines = toolOutput.split("\n");
-                    const maxLines = output === "verbose" ? Infinity : MAX_RESULT_LINES;
-                    const shown = lines.slice(0, maxLines);
-                    for (const line of shown) {
-                        ui.write(`${color}  ${line}${RESET}\n`);
-                    }
-                    if (lines.length > maxLines) {
-                        ui.write(`${color}  ... ${lines.length - maxLines} more lines${RESET}\n`);
-                    }
-                }
-            }
-            if (event.stderr) {
-                ui.write(`${RED}  ${event.stderr.trim()}${RESET}\n`);
-            }
-
-            // Claude processes the result next
-            spinner.start("thinking");
-        }
-
-        // RESULT ----------------------------------------------------------- /
-        if (event.type === "result") {
-            spinner.stop();
-            if (event.isError && !killed) {
-                process.stderr.write(`Error: ${event.result || "unknown"}\n`);
-                process.exit(1);
-            }
-            // Print result text if we haven't streamed content yet
-            if (!streamedText && event.result && !killed) {
-                process.stdout.write(event.result);
-                responseText = event.result;
-            }
-        }
+        handler.handle(event, control);
     };
 
     let systemPrompt = await resolveSystemPrompt(cfg, bridge);
 
+    const bridgePerms = (effectivePerms === "ask" || effectivePerms === "confirm")
+        ? "auto"
+        : effectivePerms;
     const bridgeResult = await bridge.run(
         {
             prompt,
@@ -268,7 +282,7 @@ Promise<ShellResult> {
             timeout: cfg.timeout ? cfg.timeout * 1000 : undefined,
             options: {
                 effort,
-                perms: (isAskMode || isConfirmMode) ? "auto" : effectivePerms,
+                perms: bridgePerms,
                 tools,
                 url: url || undefined,
                 apiKey: apiKey || undefined,
@@ -281,7 +295,7 @@ Promise<ShellResult> {
     spinner.stop();
 
     // Don't error on intentional kill
-    if (!killed && bridgeResult.isError && !streamedText) {
+    if (!handler.killed && bridgeResult.isError && !handler.streamedText) {
         process.stderr.write(bridgeResult.errorText || "Backend error\n");
         process.exit(1);
     }
@@ -290,11 +304,11 @@ Promise<ShellResult> {
     return {
         sessionId: bridgeResult.sessionId,
         approvedTools,
-        killed,
+        killed: handler.killed,
         usage: bridgeResult.usage,
         durationMs: bridgeResult.durationMs,
         numTurns: bridgeResult.numTurns,
-        responseText,
+        responseText: handler.responseText,
     };
 }
 
@@ -320,7 +334,8 @@ async function resolveInput(prompt: string) {
     // if pipe stdin but empty pipe + no arguments - echo "" | ? or
     // interactive mode and the prompt is empty
     if (!prompt) {
-        const pfx = (await loadJSON<{ prefix?: string }>(GLOBAL_CONFIG_FILE, {})).prefix || CONFIG_DEFAULTS.prefix;
+        const pfx = (await loadJSON<{ prefix?: string }>
+                     (GLOBAL_CONFIG_FILE, {})).prefix || CONFIG_DEFAULTS.prefix;
         console.log(`Usage: ${pfx} <prompt>    (or /help for commands)`);
         process.exit(0);
     }
@@ -356,7 +371,7 @@ async function resolveSession(cfg: ShellConfig) {
             // were having issues
             // i mena makes sesnse to have diff CC and Giverny message history
             // Message History is what sessions/conversations are
-            // would be best to figure out how to do proper CC <-> Giverny integration
+            // figure out how to do proper CC <-> Giverny integration
             if (best) {
                 sessionId = best.id;
                 await saveSession(best.id);
@@ -376,6 +391,25 @@ function appendToTranscript(prompt: string, text: string) {
         TRANSCRIPT_FILE, 
         `<|user|>\n${prompt}\n<|end|>\n<|assistant|>\n${text}\n<|end|>\n`
     );
+}
+
+// Try with session, retry fresh if session is stale/corrupt
+async function runWithSessionRetry(
+    prompt:        string,
+    bridge:        Bridge,
+    cfg:           ShellConfig,
+    sessionId:     string | null,
+    approvedTools: Set<string>,
+): Promise<ShellResult> {
+    try {
+        return await runShell(prompt, bridge, cfg, sessionId, approvedTools);
+    } catch (e) {
+        if (sessionId) {
+            await clearSession();
+            return await runShell(prompt, bridge, cfg, null, approvedTools);
+        }
+        throw e;
+    }
 }
 
 async function resultPersistence(
@@ -419,7 +453,6 @@ async function resultPersistence(
     }
 }
 
-
 // Main --------------------------------------------------------------------- /
 // another giga beast the main argument parsing function
 export async function main() {
@@ -458,19 +491,13 @@ export async function main() {
 
     // the core data transformation starts here
     // we process and back the prompt, then hand it off
-    // responseText key, local interface for printing
     let result: ShellResult;
     try {
-        result = await runShell(prompt, bridge, cfg, sessionId, approvedTools);
+        result = await runWithSessionRetry(
+            prompt, bridge, cfg, sessionId, approvedTools);
     } catch (e: any) {
-        // If resume failed, retry without session; as in resume session
-        if (sessionId && e.message?.includes("error")) {
-            await clearSession();
-            result = await runShell(prompt, bridge, cfg, null, approvedTools);
-        } else {
-            process.stderr.write(`Error: ${e.message}\n`);
-            process.exit(1);
-        }
+        process.stderr.write(`Error: ${e.message}\n`);
+        process.exit(1);
     }
 
     // do stuff with the result, save session, tool perms, transcript, usage
