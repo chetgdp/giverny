@@ -265,14 +265,16 @@ async function generate(
             }
         }
     } finally {
-        reader.releaseLock();
+        // gotResult path cancels reader below (cancel releases the lock).
+        // All other paths: stream ended naturally or was cancelled by timeout.
+        if (!gotResult) reader.releaseLock();
     }
 
     if (gotResult) {
         clearTimeout(timer);
         proc.kill(9);
+        reader.cancel();        // close stdout pipe fd — orphaned agent children keep it open
         stderrReader.cancel();
-        await proc.exited;
         return { ok: true, sessionId };
     }
 

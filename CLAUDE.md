@@ -93,7 +93,7 @@ Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without sid
 
 1. **Stderr must drain in background** — started before the read loop. If claude blocks on a stderr write (64KB pipe buffer full), stdout stalls. The drain runs as a fire-and-forget promise.
 2. **Timeout must cancel the stdout reader** — `proc.kill(9)` alone is not enough. Orphaned child processes (tool executions) inherit pipe fds and keep them open. The timeout handler must call both `proc.kill(9)` AND `reader.cancel()` to break the read loop.
-3. **gotResult path must not await stderr** — after receiving a result event, kill the process and return immediately. Do not await stderrDrain — orphaned children may hold the pipe open indefinitely.
+3. **gotResult path must cancel readers and return immediately** — after receiving a result event, kill the process, `reader.cancel()` stdout (not just `releaseLock` — that leaves the pipe fd open), `stderrReader.cancel()`, and return. Do not await `proc.exited` or `stderrDrain` — orphaned agent children inherit pipe fds and keep them open indefinitely, which holds the event loop alive and prevents the process from exiting.
 
 The `GIVERNY_CLAUDE_BIN` env var overrides the claude binary path (defaults to `"claude"`). Used by tests to inject controlled behavior.
 

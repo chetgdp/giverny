@@ -1,6 +1,6 @@
 // bridge-loop.ts
 /*
-* Bridge — agent loop dispatcher.
+* Bridge: agent loop dispatcher.
 *
 * Wraps any Backend into a consumer-friendly API. Shell and server
 * talk to Bridge, never to Backend directly.
@@ -9,7 +9,7 @@
 * events pass through, pause/resume map to backend signals.
 *
 * For non-agentLoop backends (future): Bridge runs the tool
-* execution loop itself.
+* execution loop itself. The exec -sh `` loop.
 */
 
 import { log } from "./config";
@@ -29,13 +29,13 @@ import {
 import { executeTool } from "./tools";
 
 export interface RunOptions {
-    prompt: string;
-    model?: string;
-    systemPrompt?: string;
-    sessionId?: string;
-    timeout?: number;
-    cwd?: string;
-    options?: Record<string, any>;
+    prompt:         string;
+    model?:         string;
+    systemPrompt?:  string;
+    sessionId?:     string;
+    timeout?:       number;
+    cwd?:           string;
+    options?:       Record<string, any>;
 }
 
 export class Bridge {
@@ -43,7 +43,7 @@ export class Bridge {
 
     get info(): BackendInfo { return this.backend.info; }
 
-    // Streaming — used by shell
+    // Streaming, used by shell
     async run(
         opts: RunOptions,
         onEvent: (event: BridgeEvent, control: RunControl) => void,
@@ -54,7 +54,7 @@ export class Bridge {
         return this.runWithToolLoop(opts, onEvent);
     }
 
-    // Collected — used by server
+    // Collected, used by server
     async collect(opts: RunOptions): Promise<BridgeResult> {
         const result = await this.run(opts, () => {});
 
@@ -71,7 +71,7 @@ export class Bridge {
         return result;
     }
 
-    // agentLoop:false path — Bridge owns the tool execution loop.
+    // agentLoop:false path, Bridge owns the tool execution loop.
     // Backend is a single-turn completion primitive. Bridge calls generate(),
     // executes tool calls, appends results to messages, repeats.
     private async runWithToolLoop(

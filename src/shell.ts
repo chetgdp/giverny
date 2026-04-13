@@ -58,11 +58,16 @@ async function resolveSystemPrompt(cfg: ShellConfig, bridge: Bridge) {
     // Resolve system prompt: file reference → file content, inline text → as-is
     const rawPrompt = cfg.systemPrompt;
     const promptFile = rawPrompt && rawPrompt !== "default"
-        ? await resolvePromptFile(rawPrompt) : null;
-    const resolvedPrompt = promptFile ? promptFile.content : rawPrompt;
-    const systemPrompt = bridge.info.capabilities.agentLoop ? undefined
-        : resolvedPrompt === "default" ? TOOL_SYSTEM_PROMPT
-        : resolvedPrompt || undefined;
+        ? await resolvePromptFile(rawPrompt) 
+        : null;
+    const resolvedPrompt = promptFile 
+        ? promptFile.content 
+        : rawPrompt;
+    const systemPrompt = bridge.info.capabilities.agentLoop 
+        ? undefined
+        : resolvedPrompt === "default" 
+            ? TOOL_SYSTEM_PROMPT
+            : resolvedPrompt || undefined;
 
     return systemPrompt;
 }
