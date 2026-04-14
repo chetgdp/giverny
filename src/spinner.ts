@@ -120,9 +120,16 @@ export interface SpinnerCtx {
     effort: string;
 }
 
+// Minimum dwell before the spinner's first frame renders. Fast tools
+// (Read, Grep, safe Bash) finish in <150ms — without this delay, start()
+// renders a frame that gets cleared by the next stop() almost immediately,
+// producing a visible flash between the summary line and the result output.
+const FIRST_FRAME_DELAY_MS = 180;
+
 export function createSpinner(ctx: SpinnerCtx) {
     let i = 0;
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let startTimeout: ReturnType<typeof setTimeout> | null = null;
     // Total elapsed time never resets — tracks wall time across all phases
     let startTime = Date.now();
 
@@ -159,6 +166,7 @@ export function createSpinner(ctx: SpinnerCtx) {
         start(label: string) {
             // Clear interval without clearing the line — render() overwrites in place
             if (intervalId) { clearInterval(intervalId); intervalId = null; }
+            if (startTimeout) { clearTimeout(startTimeout); startTimeout = null; }
             i = 0;
             // "thinking" is conveyed by the kaomoji — no need for the word
             const showLabel = label !== "thinking";
@@ -208,7 +216,8 @@ export function createSpinner(ctx: SpinnerCtx) {
                 const metaCol = 27; // column where metadata starts (after max 25-col kaomoji + gap)
                 const mins = Math.floor(totalElapsed / 60);
                 const secs = totalElapsed % 60;
-                const time = mins > 0 ? `${mins}m${secs.toString().padStart(2, "0")}s` : `${secs}s`;
+                const rawTime = mins > 0 ? `${mins}m${secs.toString().padStart(2, "0")}s` : `${secs}s`;
+                const time = rawTime.padStart(6, " ");
                 const toolLabel = showLabel ? label : "";
 
                 // Build metadata string progressively based on available space
@@ -235,10 +244,17 @@ export function createSpinner(ctx: SpinnerCtx) {
                 }
             };
 
-            render(); // first frame immediately
-            intervalId = setInterval(render, current.interval);
+            // Defer first frame: if stop() fires within FIRST_FRAME_DELAY_MS
+            // (fast tools), intervalId stays null and the stop() path below
+            // skips the \r\x1b[K, so nothing ever flashes to the terminal.
+            startTimeout = setTimeout(() => {
+                startTimeout = null;
+                render();
+                intervalId = setInterval(render, current.interval);
+            }, FIRST_FRAME_DELAY_MS);
         },
         stop() {
+            if (startTimeout) { clearTimeout(startTimeout); startTimeout = null; }
             if (intervalId) {
                 clearInterval(intervalId);
                 intervalId = null;
