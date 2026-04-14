@@ -511,6 +511,11 @@ export async function main() {
     // a two liner is nice for visual distinction
     // only fires when the end is clean text
     process.stdout.write("\n\n");
+
+    // Force exit. claude -p's orphaned agent children inherit stdout/stderr
+    // pipe fds and keep them open, which holds Bun's event loop alive after
+    // main returns. Without this, the terminal never gets control back.
+    process.exit(0);
 }
 
 if (import.meta.main) main();

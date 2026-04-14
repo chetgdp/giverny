@@ -218,10 +218,12 @@ async function generate(
 
     // Timeout backstop: kill the process AND cancel both readers.
     // Both are needed because orphaned child processes can hold pipes open.
+    // Each op is wrapped so one failing (e.g. proc already dead) doesn't
+    // skip the other cancellations.
     const timer = setTimeout(() => {
-        proc.kill(9);
-        reader.cancel();
-        stderrReader.cancel();
+        try { proc.kill(9); } catch {}
+        try { reader.cancel(); } catch {}
+        try { stderrReader.cancel(); } catch {}
     }, timeout);
     const decoder = new TextDecoder();
     let buffer = "";

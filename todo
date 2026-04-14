@@ -4,6 +4,7 @@
     - only user messages load into resume history 
 - [x] fix backend vs prefs setup flows, blocks other non setup words
 - [x] add --local to setup flow?
+- [] fix flashing tool calls and inconsistent padding from 9s to 10s
 - [] general refactor
 - [] play unix commnads more for edge cases
 - [] hanging maybe

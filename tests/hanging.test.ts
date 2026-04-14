@@ -259,4 +259,34 @@ describe("bridge hanging scenarios", () => {
         expect(events.some(e => e.type === "assistant")).toBe(true);
         expect(events.some(e => e.type === "result")).toBe(true);
     });
+
+    // Orphan children holding stdio pipes: generate() must still return fast.
+    // This is the "agent finished, terminal never returns" scenario that
+    // motivates the process.exit(0) in shell main — generate() itself is fine,
+    // but Bun keeps the event loop alive afterward because of the orphan fds.
+    it("orphan children holding pipes do not delay generate()", async () => {
+        writeFakeClaude(`
+            echo '${INIT_LINE}'
+            echo '${ASSISTANT_LINE}'
+            # Spawn orphan that keeps BOTH pipe fds open and writes continuously
+            (
+                for i in $(seq 1 60); do
+                    echo "noise $i"
+                    echo "noise $i" >&2
+                    sleep 0.5
+                done
+            ) &
+            echo '${RESULT_LINE}'
+            # Parent exits but orphan keeps pipes alive
+            exit 0
+        `);
+
+        const start = Date.now();
+        const { ok } = await runGenerate();
+        const elapsed = Date.now() - start;
+
+        expect(ok).toBe(true);
+        // Should return promptly despite orphan holding pipes open
+        expect(elapsed).toBeLessThan(2000);
+    });
 });
