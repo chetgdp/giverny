@@ -42,11 +42,12 @@ if ! command -v bun &>/dev/null; then
 fi
 echo "[ok] bun $(bun --version)"
 
-if ! command -v claude &>/dev/null; then
-  echo "[!!] claude CLI not found"
-  exit 1
-fi
-echo "[ok] claude CLI found"
+# this is not needed for local mode
+#if ! command -v claude &>/dev/null; then
+#  echo "[!!] claude CLI not found"
+#  exit 1
+#fi
+#echo "[ok] claude CLI found"
 
 mkdir -p "$BIN_DIR"
 ln -sf "$DEV_DIR/run.ts" "$BIN_DIR/giverny"
