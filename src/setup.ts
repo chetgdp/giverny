@@ -118,7 +118,17 @@ if (existsSync(CONFIG_PATH)) {
 // Only check if backend flow is running and current config uses claude-code
 
 if (runBackend) {
-    const currentBackend = config.backend || "claude-code";
+    const currentBackend = config.backend || DEFAULTS.backend;
+    if (currentBackend === "pi") {
+        console.log(`\n${BOLD}pi${RESET}`);
+        try {
+            const version = execSync("pi --version", { stdio: ["pipe", "pipe", "pipe"] }).toString().trim();
+            ok(`pi ${version}`);
+        } catch {
+            warn("pi CLI not found");
+            console.log(`  ${DIM}needed for pi backend: https://github.com/badlogic/pi-mono${RESET}`);
+        }
+    }
     if (currentBackend === "claude-code") {
         console.log(`\n${BOLD}claude${RESET}`);
 
@@ -191,6 +201,7 @@ let output = config.output || DEFAULTS.output;
 if (runBackend) {
 
 backend = prompt("backend", [
+    { value: "pi", desc: "pi CLI (provider-agnostic coding agent, default)" },
     { value: "claude-code", desc: "claude CLI (requires claude -p)" },
     { value: "completions", desc: "/v1/chat/completions (llama.cpp, ollama, vllm, etc.)" },
     { value: "responses", desc: "/v1/responses streaming (OpenAI, OpenRouter, etc.)" },
@@ -388,6 +399,18 @@ if (backend === "actual.inc") {
         });
     });
     if (respKeyInput) apiKey = respKeyInput;
+} else if (backend === "pi") {
+    // Model choice lives in pi's own config; "default" passes no --model
+    model = "default";
+    effort = prompt("effort", [
+        { value: "off", desc: "no thinking" },
+        { value: "minimal", desc: "barely any thinking" },
+        { value: "low", desc: "minimal thinking, fastest" },
+        { value: "medium", desc: "balanced speed and quality" },
+        { value: "high", desc: "thorough, considers edge cases" },
+        { value: "xhigh", desc: "extra thorough" },
+        { value: "max", desc: "maximum thinking" },
+    ], config.effort);
 } else if (backend === "claude-code") {
     model = prompt("model", [
         { value: "opus", desc: "1M context, supports max effort" },

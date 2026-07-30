@@ -37,12 +37,12 @@ export function printHelp(prefix?: string) {
     console.log("  /help                     Show this help");
     console.log("  /status                   Show version, session, account");
     console.log("  /backend                  Show current backend");
-    console.log("  /config                   Show giverny + claude code settings");
+    console.log("  /config                   Show giverny + backend settings");
     console.log("  /context                  Show context window + token usage");
-    console.log("  /model <name>             Set model");
-    console.log("  /opus /sonnet /haiku");
-    console.log("  /effort <level>           Set effort level");
-    console.log("  /low /medium /high /max");
+    console.log("  /model <name>             Set model (pi: any id passes through)");
+    console.log("  /opus /sonnet /haiku      (claude-code shortcuts)");
+    console.log("  /effort <level>           Set effort level (see /effort for backend levels)");
+    console.log("  /low /medium /high /max   (pi also: /off /minimal /xhigh)");
     console.log("  /perms <mode>             Show or set permissions mode");
     console.log("  /ask /confirm /auto /plan");
     console.log("  /output <mode>            Set tool output mode");
@@ -53,7 +53,7 @@ export function printHelp(prefix?: string) {
     console.log("  /diff [instruction]       Analyze git diff (default: summarize)");
     console.log("  /compact [focus]          Compact context (focus: what to prioritize)");
     console.log("  /resume [id] [claude]     List sessions, or resume by number/id");
-    console.log("                            Add 'claude' to open in claude code");
+    console.log("                            Add 'claude' to open in claude code (claude-code backend)");
     console.log("  /export [file]            Export transcript (to file or stdout)");
     console.log("  /last /copy               Print last response (pipe to clipboard)");
     console.log("  /new [prompt]             Clear session (optionally run prompt)");
@@ -67,6 +67,6 @@ export function printHelp(prefix?: string) {
 
     console.log(`\n${BOLD}Environment${RESET}`);
     console.log("  PORT=8741                 Bridge server port");
-    console.log("  CLAUDE_EFFORT=max         Effort level (low/medium/high/max)");
+    console.log("  CLAUDE_EFFORT=max         Default effort level (levels vary by backend, see /effort)");
     console.log("  CLAUDE_TIMEOUT=300000     Per-turn timeout in ms");
 }

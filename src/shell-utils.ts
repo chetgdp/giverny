@@ -22,7 +22,15 @@ export function isUUID(id: string) {
 // Permission check --------------------------------------------------------- /
 // Safe tools auto-approve in ask mode; everything else prompts.
 // Bash gets heuristic checkingread-only commands pass through.
-const SAFE_TOOLS = new Set(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "LSP"]);
+// TitleCase = claude-code tools, lowercase = pi tools
+const SAFE_TOOLS = new Set([
+    "Read", "Glob", "Grep", "WebSearch", "WebFetch", "LSP",
+    "read", "grep", "find", "ls",
+]);
+
+// Tools whose input is a shell command (field `command`) — they share the
+// safe-command bypass and the danger check in shell.ts
+export const COMMAND_TOOLS = new Set(["Bash", "bash", "exec"]);
 
 // Read-only command binariesno side effects, no writes
 const SAFE_BASH = new Set([
@@ -83,7 +91,7 @@ export function isSafeBashCommand(command: string): boolean {
 
 export function needsPermission(toolName: string, input?: Record<string, any>): boolean {
     if (SAFE_TOOLS.has(toolName)) return false;
-    if ((toolName === "Bash" || toolName === "exec") && input?.command && isSafeBashCommand(input.command)) return false;
+    if (COMMAND_TOOLS.has(toolName) && input?.command && isSafeBashCommand(input.command)) return false;
     return true;
 }
 
@@ -163,6 +171,14 @@ export const TOOL_SUMMARIES: Record<string, (input: any) => string> = {
     Glob: (i) => i.pattern || "",
     WebSearch: (i) => i.query?.slice(0, 80) || "",
     WebFetch: (i) => i.url?.slice(0, 80) || "",
+    // pi tools (lowercase, path/pattern arg names)
+    bash: (i) => i.command || "",
+    read: (i) => i.path || "",
+    write: (i) => i.path || "",
+    edit: (i) => i.path || "",
+    grep: (i) => `${i.pattern || ""} ${i.path || ""}`.trim(),
+    find: (i) => `${i.pattern || ""} ${i.path || ""}`.trim(),
+    ls: (i) => i.path || "",
 };
 
 export function summarizeTool(name: string, input: any): string {

@@ -22,10 +22,11 @@ import { createSpinner } from "./spinner";
 import {
     DIM, RED, ORANGE, SEA_GREEN, RESET, INV, PIPED,
     needsPermission, isDangerousCommand, summarizeTool, ui, isUUID,
+    COMMAND_TOOLS,
 } from "./shell-utils";
 import {
     GIVERNY_DIR, GLOBAL_CONFIG_FILE, USAGE_FILE, TRANSCRIPT_FILE,
-    loadJSON, loadConfig, loadSession, loadApproved, loadUsage,
+    loadJSON, loadConfig, loadSession, loadSessionBackend, loadApproved, loadUsage,
     saveSession, saveUsage, saveApproved, clearSession,
     discoverSessions, discoverConversations, resolvePromptFile
 } from "./state";
@@ -72,22 +73,48 @@ async function resolveSystemPrompt(cfg: ShellConfig, bridge: Bridge) {
     return systemPrompt;
 }
 
-// Show diff preview for write operations (always full length)
+// Diff preview for write operations (always full length).
+// Normalize then render: one function maps every edit shape the backends
+// emit to {old, new} hunks, one loop paints them. Display-only, so malformed
+// input is filtered rather than thrown — a preview crash would escape into
+// runWithSessionRetry and re-execute the whole prompt.
+function editHunks(block: ToolUseBlock): { old: string; new: string }[] {
+    const input = block.input || {};
+
+    // claude Edit: {old_string, new_string}
+    if (block.name === "Edit" && input.old_string != null) {
+        return [{ old: String(input.old_string), new: String(input.new_string ?? "") }];
+    }
+
+    // pi edit: {edits: [{oldText, newText}]}; models also emit edits as a
+    // JSON string and a legacy flat {oldText, newText} — pi normalizes both
+    if (block.name === "edit") {
+        let edits: unknown = input.edits;
+        if (typeof edits === "string") {
+            try { edits = JSON.parse(edits); } catch { edits = []; }
+        }
+        if (!Array.isArray(edits)) {
+            edits = input.oldText != null ? [{ oldText: input.oldText, newText: input.newText }] : [];
+        }
+        return (edits as unknown[])
+            .filter((e): e is Record<string, any> => e != null && typeof e === "object")
+            .map(e => ({ old: String(e.oldText ?? ""), new: String(e.newText ?? "") }));
+    }
+
+    // whole-file writes: everything is new
+    if ((block.name === "Write" || block.name === "write") && input.content != null) {
+        return [{ old: "", new: String(input.content) }];
+    }
+
+    return [];
+}
+
 function diffPreviewRender(block: ToolUseBlock) {
-    if (block.name === "Edit" && block.input.old_string != null) {
-        const oldLines = block.input.old_string.split("\n");
-        const newLines = (block.input.new_string || "").split("\n");
-        for (const line of oldLines) {
-            ui.write(`${RED}  - ${line}${RESET}\n`);
+    for (const hunk of editHunks(block)) {
+        if (hunk.old) {
+            for (const line of hunk.old.split("\n")) ui.write(`${RED}  - ${line}${RESET}\n`);
         }
-        for (const line of newLines) {
-            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-        }
-    } else if (block.name === "Write" && block.input.content != null) {
-        const lines = block.input.content.split("\n");
-        for (const line of lines) {
-            ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
-        }
+        for (const line of hunk.new.split("\n")) ui.write(`${SEA_GREEN}  + ${line}${RESET}\n`);
     }
 }
 
@@ -109,7 +136,7 @@ function checkPermissions(
         control.pause?.();
 
         // Extra warning for catastrophic commands — flips default to deny
-        const danger = block.name === "Bash"
+        const danger = COMMAND_TOOLS.has(block.name)
             ? isDangerousCommand(block.input?.command || "")
             : null;
         if (danger) {
@@ -349,37 +376,46 @@ async function resolveInput(prompt: string) {
 }
 
 // what does this return?
+// Session init: detect backend/session mismatch from backend switches.
 async function resolveSession(cfg: ShellConfig) {
-    // Session init: detect backend/session mismatch from backend switches.
-    // claude-code needs UUID sessions; completions/responses use conv-* IDs.
     // some flags
-    const isClaudeBackend = cfg.backend === "claude-code";
     const isFresh = cfg.session === "fresh";
     let sessionId = isFresh ? null : await loadSession();
+
     // on existing session
-    if (sessionId && !isFresh) {
-        // CC expects UUID
-        const mismatch = isUUID(sessionId) != isClaudeBackend; 
+    if (sessionId) {
+        // claude-code and pi ids are both UUIDs, so the id shape alone can't
+        // identify the owning backend. Prefer the stored backend; fall back
+        // to the UUID heuristic for legacy entries saved without one.
+        const usesUuidSessions = cfg.backend === "claude-code" || cfg.backend === "pi";
+        const savedBackend = await loadSessionBackend();
         // if we are CC then we need sessionId to be a UUID otherwise no
         // just look at this absolutely dogwater code you get from LLM hahaha
         // backwarsd double negative ternary assignemnt LOL
         //const mismatch=isClaudeBackend ? !isUUID(sessionId) : isUUID(sessionId);
+        const mismatch = savedBackend
+            ? savedBackend !== cfg.backend
+            : isUUID(sessionId) !== usesUuidSessions;
+
         if (mismatch) {
-            // Auto-recover: find the most recent session for the current backend
-            const discovered = isClaudeBackend
-                // omg the sessions vs conversations jesus is rizzen save me
-                ? await discoverSessions(1)
+            // Auto-recover with the most recent session for the current
+            // backend. pi sessions live in pi's own storage and have no
+            // discovery yet, so a mismatch there just clears the session.
+            // omg the sessions vs conversations jesus is rizzen save me
+            const { sessions } =
+                cfg.backend === "claude-code" ? await discoverSessions(1)
+                : cfg.backend === "pi"        ? { sessions: [] }
                 : await discoverConversations(1);
             // top one?
-            const best = discovered.sessions[0];
-            // huh, im so confused, this whole mismatch block, 
+            const best = sessions[0];
+            // huh, im so confused, this whole mismatch block,
             // were having issues
             // i mena makes sesnse to have diff CC and Giverny message history
             // Message History is what sessions/conversations are
             // figure out how to do proper CC <-> Giverny integration
             if (best) {
                 sessionId = best.id;
-                await saveSession(best.id);
+                await saveSession(best.id, cfg.backend);
             } else {
                 sessionId = null;
                 await clearSession();
@@ -388,7 +424,6 @@ async function resolveSession(cfg: ShellConfig) {
     }
 
     return { sessionId, isFresh };
-
 }
             
 function appendToTranscript(prompt: string, text: string) {
@@ -418,9 +453,10 @@ async function runWithSessionRetry(
 }
 
 async function resultPersistence(
-    result: ShellResult, 
-    prompt: string, 
-    isFresh: boolean) 
+    result: ShellResult,
+    prompt: string,
+    isFresh: boolean,
+    backend?: string)
 {
     // saving sessions
     // another source of pain
@@ -428,7 +464,7 @@ async function resultPersistence(
     // Always preserve session and approved tools, denying one tool call
     // shouldn't destroy context. Null checks protect against partial state.
     if (!isFresh && result.sessionId) {
-        await saveSession(result.sessionId);
+        await saveSession(result.sessionId, backend);
     }
 
     // tools perms when user says yes to a too
@@ -506,7 +542,7 @@ export async function main() {
     }
 
     // do stuff with the result, save session, tool perms, transcript, usage
-    await resultPersistence(result, prompt, isFresh);
+    await resultPersistence(result, prompt, isFresh, cfg.backend);
 
     // a two liner is nice for visual distinction
     // only fires when the end is clean text

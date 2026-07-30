@@ -29,6 +29,33 @@ const sourceTag = (source: ConfigSource) =>
 
 const VALID_VERBOSE = ["quiet", "normal", "verbose"];
 
+// Tool name/description listings for /tools, keyed by backend name.
+// Backends not listed fall back to the claude-code set (completions and
+// responses inject the same TitleCase tool schemas).
+const BACKEND_TOOLS: Record<string, [string, string][]> = {
+    "claude-code": [
+        ["Read",      "Read file contents"],
+        ["Write",     "Create or overwrite files"],
+        ["Edit",      "Edit files with string replacement"],
+        ["Bash",      "Execute shell commands"],
+        ["Glob",      "Find files by pattern"],
+        ["Grep",      "Search file contents"],
+        ["WebSearch", "Search the web"],
+        ["WebFetch",  "Fetch a URL"],
+        ["Agent",     "Spawn sub-agents"],
+        ["LSP",       "Language server queries"],
+    ],
+    pi: [
+        ["read",  "Read file contents"],
+        ["write", "Create or overwrite files"],
+        ["edit",  "Edit files with string replacement"],
+        ["bash",  "Execute shell commands"],
+        ["grep",  "Search file contents (off by default)"],
+        ["find",  "Find files by glob (off by default)"],
+        ["ls",    "List directories (off by default)"],
+    ],
+};
+
 // Command chaining: `/opus /high write a haiku` → set model, set effort, run prompt.
 // Each command consumes only its args and passes the rest along.
 
@@ -180,6 +207,18 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             const usage = await loadUsage();
             const sessionId = await loadSession();
             const m = cfg.model;
+            // Freeform backends (pi): the model isn't known to giverny, so a
+            // window guess would be misinformation — show counts only
+            if (bridge.info.models.length === 0) {
+                const used = (usage.input_tokens || 0) + (usage.output_tokens || 0);
+                console.log(`${BOLD}context${RESET} ${DIM}(${m}, window unknown for ${bridge.info.name})${RESET}`);
+                console.log(`  ${used.toLocaleString()} tokens (input: ${(usage.input_tokens || 0).toLocaleString()} · output: ${(usage.output_tokens || 0).toLocaleString()})`);
+                if (usage.turns > 0) {
+                    console.log(`  ${usage.turns} turns · ${(usage.duration_ms / 1000).toFixed(1)}s`);
+                }
+                if (sessionId) console.log(`  ${DIM}${sessionId}${RESET}`);
+                return chainRemainder(remainder, bridge);
+            }
             const window = bridge.info.models.find(x => x.id === m)?.contextWindow || 200_000;
             const input = usage.input_tokens || 0;
             const output = usage.output_tokens || 0;
@@ -208,14 +247,32 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
         case "opus":
         case "sonnet":
         case "haiku":
+            // claude-code shortcuts; on freeform backends (pi) they would
+            // persist an id the backend can't resolve
+            if (bridge.info.models.length === 0) {
+                console.log(`${RED}/${name} is a claude-code shortcut${RESET} (${bridge.info.name} models pass through: /model <id>)`);
+                return chainRemainder(remainder, bridge);
+            }
             return handleSlashCommand(delegateCmd("model", name, isLocal, remainder), bridge);
         case "model": {
+            // Backends with no static model list (pi is provider-agnostic):
+            // pass any id through verbatim, "default" defers to the backend
+            const freeform = bridge.info.models.length === 0;
             if (!arg) {
                 console.log(`model: ${cfg.model}${sourceTag(sources.model)}`);
+                if (freeform) {
+                    console.log(`  ${DIM}${bridge.info.name} models are configured in the backend itself;`);
+                    console.log(`  any id passes through, "default" uses its config${RESET}`);
+                }
                 for (const mi of bridge.info.models) {
                     console.log(`  ${mi.id.padEnd(8)} ${mi.description}`);
                 }
                 console.log(`  /model <name> [--local]${RESET}`);
+                return chainRemainder(remainder, bridge);
+            }
+            if (freeform) {
+                await saveConfig({ model: arg }, isLocal);
+                console.log(`model: ${arg} ${DIM}(${isLocal ? "local" : "global"})${RESET}`);
                 return chainRemainder(remainder, bridge);
             }
             const m = arg.toLowerCase();
@@ -244,9 +301,12 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             const modelEfforts = modelInfo?.efforts || allEfforts;
             if (!arg) {
                 const effortDescs: Record<string, string> = {
+                    off: "no thinking",
+                    minimal: "barely any thinking",
                     low: "minimal thinking, fastest responses",
                     medium: "balanced speed and quality",
                     high: "thorough, considers edge cases",
+                    xhigh: "extra thorough",
                     max: "maximum thinking",
                 };
                 console.log(`effort: ${cfg.effort}${sourceTag(sources.effort)}`);
@@ -275,9 +335,12 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             console.log(`effort: ${e} ${DIM}(${where})${RESET}`);
             return chainRemainder(remainder, bridge);
         }
+        case "off":
+        case "minimal":
         case "low":
         case "medium":
         case "high":
+        case "xhigh":
         case "max":
             return handleSlashCommand(delegateCmd("effort", name, isLocal, remainder), bridge);
         case "ask":
@@ -306,18 +369,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             if (!arg) {
                 const active = cfg.tools;
                 console.log(`${BOLD}tools${RESET} ${DIM}(${active})${RESET}${sourceTag(sources.tools)}`);
-                const tools = [
-                    ["Read",      "Read file contents"],
-                    ["Write",     "Create or overwrite files"],
-                    ["Edit",      "Edit files with string replacement"],
-                    ["Bash",      "Execute shell commands"],
-                    ["Glob",      "Find files by pattern"],
-                    ["Grep",      "Search file contents"],
-                    ["WebSearch", "Search the web"],
-                    ["WebFetch",  "Fetch a URL"],
-                    ["Agent",     "Spawn sub-agents"],
-                    ["LSP",       "Language server queries"],
-                ];
+                const tools = BACKEND_TOOLS[bridge.info.name] || BACKEND_TOOLS["claude-code"];
                 const activeSet = active === "all" ? null : new Set(active.split(",").map(s => s.trim()));
                 for (const [name, desc] of tools) {
                     const on = !activeSet || activeSet.has(name);
@@ -494,6 +546,13 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
         case "continue": {
             // Backend-aware session discovery
             const isClaude = bridge.info.name === "claude-code";
+            if (bridge.info.name === "pi") {
+                // pi sessions live in pi's own storage; no discovery yet.
+                // Listing .giverny/conversations here would offer conv-* ids
+                // that resolveSession then silently discards.
+                console.log(`${DIM}session listing not supported for pi yet (use \`pi -r\` to resume in pi)${RESET}`);
+                return chainRemainder(remainder, bridge);
+            }
             const { sessions, total } = isClaude
                 ? await discoverSessions()
                 : await discoverConversations();
@@ -523,7 +582,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 } else {
                     console.log(`\n${DIM}.giverny/conversations/${RESET}`);
                 }
-                console.log(`${DIM}/resume <n>  ·  /resume <n> claude${RESET}`);
+                console.log(`${DIM}/resume <n>${isClaude ? "  ·  /resume <n> claude" : ""}${RESET}`);
                 return chainRemainder(remainder, bridge);
             }
             // Parse: /resume <id> [mode]
@@ -562,7 +621,7 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             }
 
             // Default: resume in giverny
-            await saveSession(target);
+            await saveSession(target, bridge.info.name);
             console.log(`resumed: ${target.slice(0, 8)}…`);
             return chainRemainder(remainder, bridge);
         }

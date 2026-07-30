@@ -161,6 +161,10 @@ export function getBackend(
             const { claudeCodeBackend } = require("./bridge");
             return claudeCodeBackend;
         }
+        case "pi": {
+            const { piBackend } = require("./pi");
+            return piBackend;
+        }
         case "responses": {
             const { responsesBackend } = require("./responses");
             return responsesBackend;
@@ -175,6 +179,6 @@ export function getBackend(
             return completionsBackend;
         }
         default:
-            throw new Error(`Unknown backend: ${name}. Available: claude-code, completions, actual.inc, responses`);
+            throw new Error(`Unknown backend: ${name}. Available: pi, claude-code, completions, actual.inc, responses`);
     }
 }

@@ -150,6 +150,9 @@ interface SessionEntry {
     id: string;
     ts: string;
     active?: boolean;
+    // owning backend — claude-code and pi both use UUIDs, so the id shape
+    // alone can't tell them apart (absent on legacy entries)
+    backend?: string;
 }
 
 export const loadSessions = () => loadJSON<SessionEntry[]>(SESSIONS_FILE, []);
@@ -160,7 +163,13 @@ export async function loadSession(): Promise<string | null> {
     return sessions.find(s => s.active)?.id || null;
 }
 
-export async function saveSession(id: string) {
+// Backend that owns the active session (null for legacy entries without one)
+export async function loadSessionBackend(): Promise<string | null> {
+    const sessions = await loadSessions();
+    return sessions.find(s => s.active)?.backend || null;
+}
+
+export async function saveSession(id: string, backend?: string) {
     const sessions = await loadSessions();
     // Deactivate all, then activate/add this one
     for (const s of sessions) s.active = false;
@@ -168,8 +177,9 @@ export async function saveSession(id: string) {
     if (existing) {
         existing.active = true;
         existing.ts = new Date().toISOString();
+        if (backend) existing.backend = backend;
     } else {
-        sessions.unshift({ id, ts: new Date().toISOString(), active: true });
+        sessions.unshift({ id, ts: new Date().toISOString(), active: true, backend });
     }
     await saveSessions(sessions);
 }

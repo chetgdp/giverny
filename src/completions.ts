@@ -102,7 +102,8 @@ async function generate(
         tools: TOOL_SCHEMAS,
     };
 
-    if (opts.model && opts.model !== "local") body.model = opts.model;
+    // "local" and "default" both mean "let the server pick"
+    if (opts.model && opts.model !== "local" && opts.model !== "default") body.model = opts.model;
     if (extra.temperature !== undefined) body.temperature = extra.temperature;
     if (extra.top_p !== undefined) body.top_p = extra.top_p;
 

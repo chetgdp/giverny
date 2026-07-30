@@ -25,6 +25,9 @@ import type {
 // Claude-specific: model normalization ------------------------------------ //
 
 export function normalizeModel(model: string): string {
+    // "default" is the config sentinel for backend-default; opus was the
+    // claude-code default before it existed, keep that behavior
+    if (model === "default") return "opus";
     const cliModel = model
         .replace(/^(anthropic|openai)\//i, "")
         .replace(/\./g, "-");

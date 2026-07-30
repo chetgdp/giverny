@@ -13,9 +13,12 @@ Multi-backend design: `src/backend.ts` defines the Backend interface, `src/bridg
 
 ### Backends
 
-- `claude-code` (default) — wraps `claude -p`, agentLoop=true, sessions via Claude Code's native storage
+- `pi` (default) — wraps `pi --mode json` (pi-mono coding agent), agentLoop=true, sessions via pi's native storage. Provider-agnostic: model choice lives in pi's own config (`model: "default"` in giverny passes no `--model`).
+- `claude-code` — wraps `claude -p`, agentLoop=true, sessions via Claude Code's native storage
 - `completions` — OpenAI-compatible `/v1/chat/completions` API, agentLoop=false (Bridge runs tool loop)
 - `responses` — OpenAI `/v1/responses` API, agentLoop=false
+
+Server mode (`src/server.ts`) stays hardcoded to claude-code: pi answers unknown-tool calls itself with an error tool result and keeps looping, so client-tool interception can't work until the pi extension (Phase 2 of plans/pi-backend.md) exists.
 
 Non-agentLoop backends use `src/tools.ts` for tool definitions and execution (single `exec` tool). System prompt is configurable: `default` (built-in shell agent), `none`, or custom string via `/prompt`.
 
@@ -29,12 +32,26 @@ Non-agentLoop backends use `src/tools.ts` for tool definitions and execution (si
 - Latency ~2-7s per invocation. Token tracking: `input_tokens` and `output_tokens` only.
 - The entire project exists because `claude -p` works surprisingly well as a programmable LLM backend.
 
+## pi JSON mode reference (pi 0.82, verified against /Users/che/pi-mono)
+
+- `pi --mode json` emits NDJSON on stdout; stdout is guarded (only event lines reach it), diagnostics go to stderr. Prompt is passed via stdin. Do NOT pass `-p`: it greedily consumes the next argv as the prompt.
+- Line 1 is a session header `{type:"session", version:3, id, timestamp, cwd}` (may be absent with `--no-session`).
+- Events: `agent_start`, `turn_start`, `message_start/update/end`, `turn_end`, `agent_end {messages, willRetry}`, `agent_settled`, `tool_execution_start/update/end`, plus housekeeping. No terminal result event — `agent_end` without `willRetry` means the run is done.
+- Assistant message (in `message_end`, discriminate on `message.role === "assistant"`): `{role, content: [{type:"text"|"thinking"|"toolCall"}], usage {input, output, cacheRead, cacheWrite}, stopReason: stop|length|toolUse|error|aborted, errorMessage?}`. toolCall blocks: `{id, name, arguments}`.
+- `tool_execution_end`: `{toolCallId, toolName, result: {content:[{type:"text",...}]}, isError}`. No stdout/stderr split.
+- Exit code 0 even when the model errored — errors only surface via `stopReason`/`errorMessage`.
+- Tools (lowercase): `read {path,offset?,limit?}`, `bash {command,timeout?}`, `edit {path, edits:[{oldText,newText}]}` (edits-as-JSON-string and legacy flat forms normalized), `write {path,content}`, plus `grep/find/ls` (off by default). `--tools <csv>` allowlist, `--no-tools` disables all. Unknown toolCalls get a self-generated error result; the loop continues.
+- `--session-id <id>` opens by exact id or creates with that id (id charset: alphanumeric with inner `._-`). Cannot combine with `-c`/`-r`/`--session`/`--fork`.
+- `--thinking off|minimal|low|medium|high|xhigh|max`, `--system-prompt`/`--append-system-prompt`, `--model provider/model` or `--provider` + `--model`.
+- No permission mechanism — giverny gates shell-side (pause/prompt); a pi extension will replace this (Phase 2).
+
 ## Key Files
 
 - `run.ts` - entry point, routes --server/--setup/--help
 - `src/backend.ts` - Backend interface contract (any LLM backend implements this)
 - `src/bridge-loop.ts` - Bridge class, agent loop dispatcher (shell/server talk to this)
 - `src/bridge.ts` - claude-code backend (`claude -p` wrapper, NDJSON parser)
+- `src/pi.ts` - pi backend (`pi --mode json` wrapper, NDJSON parser, synthesized result event)
 - `src/completions.ts` - completions backend (OpenAI chat completions API)
 - `src/responses.ts` - responses backend (OpenAI responses API)
 - `src/tools.ts` - tool definitions + executor for non-agentLoop backends (single `exec` tool)
@@ -85,7 +102,7 @@ bun test:unit              # unit only (config, bridge, protocol, shell-utils)
 bun test:integration       # HTTP integration (server on port 18741)
 ```
 
-Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without side effects. Integration tests start a real server. `tests/hanging.test.ts` tests process lifecycle — uses `GIVERNY_CLAUDE_BIN` to inject a fake claude script.
+Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without side effects. Integration tests start a real server. `tests/hanging.test.ts` and `tests/pi-hanging.test.ts` test process lifecycle — they use `GIVERNY_CLAUDE_BIN` / `GIVERNY_PI_BIN` to inject fake backend scripts.
 
 ## Process lifecycle (do not break)
 
@@ -97,6 +114,8 @@ Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without sid
 4. **Shell main must `process.exit(0)` explicitly** — even with the gotResult cancels, the Bun event loop stays alive because orphaned tool-runner children hold the inherited stdio pipe fds. Without the explicit exit, the terminal never gets control back and the user sees a stuck spinner frame after output. Server mode is long-running and doesn't need this.
 
 The `GIVERNY_CLAUDE_BIN` env var overrides the claude binary path (defaults to `"claude"`). Used by tests to inject controlled behavior.
+
+`src/pi.ts` follows the same invariants with pi's shape: there is no result event — `agent_end` without `willRetry` is the early-exit signal (invariant 3), and the ResultEvent is synthesized at that point from accumulated state. Settled-path order matters: `clearTimeout` FIRST (an armed timer firing inside the grace window would `kill(9)` pi mid session-write), then a 500ms grace race against `proc.exited`, `kill(9)` only if still running, then cancel both readers while the lock is held. `GIVERNY_PI_BIN` mirrors `GIVERNY_CLAUDE_BIN`.
 
 ## Responses API tool call IDs (do not break)
 

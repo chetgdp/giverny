@@ -73,8 +73,10 @@ export interface ShellConfig {
 
 export const CONFIG_DEFAULTS: Required<Omit<ShellConfig, "backends" | "url" | "apiKey" | "clusterId" | "port" | "protocol">> = {
     prefix: "@",
-    backend: "claude-code",
-    model: "opus",
+    backend: "pi",
+    // "default" = defer to the backend's own model config (pi is
+    // provider-agnostic; claude-code maps it to opus in normalizeModel)
+    model: "default",
     effort: "high",
     perms: "ask",
     tools: "all",
