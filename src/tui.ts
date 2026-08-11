@@ -3,12 +3,101 @@
 // Extracted from setup.ts and shell-utils.ts so TTY I/O lives in one place.
 
 import { openSync, readSync, closeSync } from "fs";
-import { execSync } from "child_process";
 import { BOLD, DIM, RED, INV, RESET, ui } from "./shell-utils";
 
 export interface SelectOption {
     value: string;
     desc: string;
+}
+
+export type Key =
+    | { kind: "enter" }
+    | { kind: "escape" }
+    | { kind: "up" }
+    | { kind: "down" }
+    | { kind: "left" }
+    | { kind: "right" }
+    | { kind: "digit"; digit: number }
+    | { kind: "vim-up" }
+    | { kind: "vim-down" }
+    | { kind: "other" };
+
+export function decodeKey(bytes: Buffer, n: number): Key {
+    const length = Math.min(Math.max(n, 0), bytes.length);
+    if (length === 0) return { kind: "other" };
+
+    let end = length;
+    while (end > 0 && (bytes[end - 1] === 0x0d || bytes[end - 1] === 0x0a)) {
+        end--;
+    }
+    if (end === 0) return { kind: "enter" };
+
+    if (end === 1) {
+        const byte = bytes[0];
+        if (byte === 0x03 || byte === 0x1b) return { kind: "escape" };
+        if (byte >= 0x31 && byte <= 0x39) {
+            return { kind: "digit", digit: byte - 0x30 };
+        }
+        if (byte === 0x6b) return { kind: "vim-up" };
+        if (byte === 0x6a) return { kind: "vim-down" };
+        return { kind: "other" };
+    }
+
+    if (end === 3 && bytes[0] === 0x1b && bytes[1] === 0x5b) {
+        if (bytes[2] === 0x41) return { kind: "up" };
+        if (bytes[2] === 0x42) return { kind: "down" };
+        if (bytes[2] === 0x43) return { kind: "right" };
+        if (bytes[2] === 0x44) return { kind: "left" };
+    }
+    return { kind: "other" };
+}
+
+type RawTTYResult<T> = { ok: true; value: T } | { ok: false };
+
+function withRawTTY<T>(callback: (fd: number) => T): RawTTYResult<T> {
+    let fd: number | undefined;
+    let saved: string | undefined;
+
+    try {
+        try {
+            fd = openSync("/dev/tty", "r");
+
+            const savedResult = Bun.spawnSync(["stty", "-g"], {
+                stdin: fd,
+                stdout: "pipe",
+                stderr: "ignore",
+            });
+            if (savedResult.exitCode !== 0) return { ok: false };
+            saved = savedResult.stdout.toString().trim();
+            if (!saved) return { ok: false };
+
+            const rawResult = Bun.spawnSync(["stty", "raw", "-echo"], {
+                stdin: fd,
+                stdout: "ignore",
+                stderr: "ignore",
+            });
+            if (rawResult.exitCode !== 0) return { ok: false };
+        } catch {
+            return { ok: false };
+        }
+
+        if (fd === undefined) return { ok: false };
+        return { ok: true, value: callback(fd) };
+    } finally {
+        if (fd !== undefined) {
+            try {
+                if (saved) {
+                    Bun.spawnSync(["stty", saved], {
+                        stdin: fd,
+                        stdout: "ignore",
+                        stderr: "ignore",
+                    });
+                }
+            } finally {
+                closeSync(fd);
+            }
+        }
+    }
 }
 
 // Interactive arrow key / j/k / number select, enter to confirm.
@@ -51,65 +140,43 @@ export function selectPrompt(
         console.log(line(i));
     }
 
-    // Raw mode for arrow keys
-    process.stdout.write("\x1b[?25l"); // hide cursor
-    execSync("stty raw -echo", { stdio: "inherit" });
+    const buf = Buffer.alloc(5);
+    const tty = withRawTTY(fd => {
+        process.stdout.write("\x1b[?25l");
+        try {
+            while (true) {
+                const key = decodeKey(buf, readSync(fd, buf, 0, buf.length));
 
-    const fd = openSync("/dev/tty", "r");
-    const buf = Buffer.alloc(3);
+                if (key.kind === "escape") return { kind: "cancelled" as const };
+                if (key.kind === "enter") break;
 
-    try {
-        while (true) {
-            const n = readSync(fd, buf, 0, 3);
-
-            // Ctrl+C or Escape — abort
-            if (buf[0] === 0x03 || (n === 1 && buf[0] === 0x1b)) {
-                closeSync(fd);
-                execSync("stty sane", { stdio: "inherit" });
-                process.stdout.write("\x1b[?25h\n");
-                process.exit(130);
-            }
-
-            // Enter
-            if (buf[0] === 0x0d || buf[0] === 0x0a) break;
-
-            // Arrow keys: \x1b [ A/B
-            if (n === 3 && buf[0] === 0x1b && buf[1] === 0x5b) {
-                if (buf[2] === 0x41) { // Up
+                if (key.kind === "up" || key.kind === "vim-up") {
                     selected = (selected - 1 + options.length) % options.length;
                     render();
-                } else if (buf[2] === 0x42) { // Down
+                } else if (key.kind === "down" || key.kind === "vim-down") {
                     selected = (selected + 1) % options.length;
                     render();
-                }
-            }
-
-            // Number keys — select and confirm immediately
-            if (n === 1 && buf[0] >= 0x31 && buf[0] <= 0x39) {
-                const num = buf[0] - 0x30; // 1-9
-                if (num >= 1 && num <= options.length) {
-                    selected = num - 1;
+                } else if (key.kind === "digit" && key.digit <= options.length) {
+                    selected = key.digit - 1;
                     render();
                     break;
                 }
             }
 
-            // j/k vim keys
-            if (n === 1 && buf[0] === 0x6b) { // k = up
-                selected = (selected - 1 + options.length) % options.length;
-                render();
-            } else if (n === 1 && buf[0] === 0x6a) { // j = down
-                selected = (selected + 1) % options.length;
-                render();
-            }
+            return { kind: "selected" as const, value: options[selected].value };
+        } finally {
+            process.stdout.write("\x1b[?25h");
         }
-    } finally {
-        closeSync(fd);
-        execSync("stty sane", { stdio: "inherit" });
-        process.stdout.write("\x1b[?25h"); // show cursor
-    }
+    });
 
-    return options[selected].value;
+    if (!tty.ok) return options[selected].value;
+
+    if (tty.value.kind === "cancelled") {
+        process.stdout.write("\n");
+        process.exit(130);
+    }
+    return tty.value.value;
+
 }
 
 // Permission prompt -------------------------------------------------------- /
@@ -119,12 +186,6 @@ export function selectPrompt(
 export function promptPermission(toolName: string, defaultDeny = false): "allow" | "tool" | "deny" {
     const options = ["allow", `allow all ${toolName}`, "deny"];
     let sel = defaultDeny ? 2 : 0;
-
-    // Save terminal settings, switch to raw mode for key-by-key input
-    const saved = Bun.spawnSync(["stty", "-F", "/dev/tty", "-g"]).stdout.toString().trim();
-    Bun.spawnSync(["stty", "-F", "/dev/tty", "raw", "-echo"]);
-
-    const fd = openSync("/dev/tty", "r");
 
     const render = () => {
         let line = "  ";
@@ -136,35 +197,38 @@ export function promptPermission(toolName: string, defaultDeny = false): "allow"
         ui.write(`\r\x1b[K${line}`);
     };
 
-    render();
+    const buf = Buffer.alloc(5);
+    const tty = withRawTTY(fd => {
+        render();
 
-    try {
         while (true) {
-            const buf = Buffer.alloc(8);
-            const n = readSync(fd, buf);
-            const key = buf.toString("utf8", 0, n);
+            const key = decodeKey(buf, readSync(fd, buf, 0, buf.length));
 
-            if (key === "\r" || key === "\n") break;          // Enter → confirm
-            if (key === "1") { sel = 0; break; }              // direct select
-            if (key === "2") { sel = 1; break; }
-            if (key === "3") { sel = 2; break; }
-            if (key === "\x1b[C" || key === "\x1b[B") {       // right / down
-                sel = Math.min(sel + 1, 2); render();
+            if (key.kind === "enter") break;
+            if (key.kind === "digit" && key.digit <= 3) {
+                sel = key.digit - 1;
+                break;
             }
-            if (key === "\x1b[D" || key === "\x1b[A") {       // left / up
-                sel = Math.max(sel - 1, 0); render();
-            }
-            if (key === "\x03" || key === "\x1b") {            // Ctrl+C / Esc → deny
-                sel = 2; break;
+            if (key.kind === "right" || key.kind === "down" || key.kind === "vim-down") {
+                sel = Math.min(sel + 1, 2);
+                render();
+            } else if (key.kind === "left" || key.kind === "up" || key.kind === "vim-up") {
+                sel = Math.max(sel - 1, 0);
+                render();
+            } else if (key.kind === "escape") {
+                sel = 2;
+                break;
             }
         }
-    } finally {
-        closeSync(fd);
-        Bun.spawnSync(["stty", "-F", "/dev/tty", saved]);
-    }
+
+        return sel;
+    });
+
+    if (!tty.ok) sel = 2;
 
     // Replace prompt line with the chosen option
     const color = sel === 2 ? RED : DIM;
     ui.write(`\r\x1b[K  ${color}${options[sel]}${RESET}\n`);
     return (["allow", "tool", "deny"] as const)[sel];
 }
+

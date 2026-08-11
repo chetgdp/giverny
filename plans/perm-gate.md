@@ -43,6 +43,12 @@ function withRawTty<T>(fn: (fd: number) => T): T
 {stdio:"inherit"})` pair and its cursor hide/show stays as is), fixing its
 piped-stdin variant of the same bug.
 
+`selectPrompt` preserves its existing Escape/Ctrl+C contract: the key handler
+returns a cancellation result, the tty and cursor are restored, then the
+process exits with status 130. `promptPermission` maps either key to deny. The
+key handler must not call `process.exit` before cleanup because Bun skips
+`finally` in that case.
+
 ### 2. Tolerant key decoding, extracted pure
 
 Extract decoding into a pure function so it is unit-testable and survives a
@@ -67,7 +73,8 @@ export function decodeKey(bytes: Buffer, n: number): Key
 - The stty layer is manual-only (no tty in bun test): verify on macOS AND linux
   - `@ touch /tmp/x` → prompt appears, `2` selects allow-all instantly,
     arrows move the highlight, Enter confirms, Esc denies
-  - `giverny --setup backend` selector still works
+  - `giverny --setup backend` selector still works; Escape/Ctrl+C exits 130
+    immediately and leaves the terminal sane on macOS and Linux
   - `echo hi | @ summarize` (piped stdin) still prompts via /dev/tty
 - `bun test` green before commit (known pre-existing llama.test.ts failure).
 
