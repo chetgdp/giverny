@@ -13,6 +13,14 @@
     - [x] user set timeout?
     - [x] await proc.exited after kil
 - [] terminal bench harbor benchmark [x] giverny controls setup vs inference backend setup (two flows, one combined)
+- [x] add pi mode
+- [] fix perm gate
+- [] fix pi timeout
+~~- [] remove claude -p completely~~ (claude -p usage still comes out of sub, not usage credit)
+- [] fix -- or / when right after ?/@ and they arent proper commands, whole command whould not run
+- [] add fable and new claude -p options
+- [] add codex? other harnesses? or is that too complicated
+- [] allow multiple alias
 
 ## general refactor (WE ARE DOING IT)
 - easy mode dedup fixes
