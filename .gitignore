@@ -9,3 +9,7 @@ slopfolder/
 # research into similar tools
 agent_harness_analysis/
 cli_llm_analysis
+
+# cloned harness repos and extracted binaries for research
+research/sources/
+.DS_Store
