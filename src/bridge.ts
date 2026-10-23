@@ -8,7 +8,8 @@
 * Used via Bridge (bridge-loop.ts) by server.ts and shell.ts.
 */
 
-import { DEFAULT_EFFORT, DEFAULT_TIMEOUT, log, readClaudeAuth } from "./config";
+import { DEFAULT_EFFORT, DEFAULT_INACTIVITY_TIMEOUT_MS, log, readClaudeAuth } from "./config";
+import { ProcessWatchdog } from "./process-watchdog";
 import type {
     Backend,
     BackendInfo,
@@ -124,8 +125,10 @@ function parseNdjsonLine(line: string): BridgeEvent | null {
             if (Array.isArray(content)) {
                 for (const block of content) {
                     if (block.type === "tool_result") {
-                        const tr = event.tool_use_result;
-                        // content can be string or array of {type:"text",text:""} blocks
+                        const tr = event.tool_use_result as {
+                            stdout?: string;
+                            stderr?: string;
+                        } | undefined;
                         const content = typeof block.content === "string"
                             ? block.content
                             : Array.isArray(block.content)
@@ -171,6 +174,23 @@ function parseNdjsonLine(line: string): BridgeEvent | null {
     return null;
 }
 
+function parseClaudeObject(line: string): { event: BridgeEvent | null; valid: boolean; label: string } {
+    if (!line.trim()) return { event: null, valid: false, label: "no event" };
+    try {
+        const parsed = JSON.parse(line);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return { event: null, valid: false, label: "invalid JSON event" };
+        }
+        return {
+            event: parseNdjsonLine(line),
+            valid: typeof parsed.type === "string",
+            label: parsed.type || "unknown event",
+        };
+    } catch {
+        return { event: null, valid: false, label: "invalid JSON event" };
+    }
+}
+
 // Generate ---------------------------------------------------------------- //
 // Spawns claude, streams NDJSON events via callback. Returns ok/error.
 // 100 line function lol
@@ -178,8 +198,8 @@ async function generate(
     opts: GenerateOptions,
     onEvent: (event: BridgeEvent, control: AbortControl) => void,
 ): Promise<GenerateResult> {
+    const timeout = opts.inactivityTimeoutMs ?? DEFAULT_INACTIVITY_TIMEOUT_MS;
     const args = buildClaudeArgs(opts);
-    const timeout = opts.timeout ?? DEFAULT_TIMEOUT;
 
     const bin = process.env.GIVERNY_CLAUDE_BIN || "claude";
     const proc = Bun.spawn([bin, ...args], {
@@ -189,19 +209,37 @@ async function generate(
         stderr: "pipe",
     });
 
-    // ProcessControl: abort + pause/resume for agentLoop support.
-    // Bridge (bridge-loop.ts) detects ProcessControl via type guard
-    // and exposes pause/resume through RunControl.
+    let stopped = false;
+    let paused = false;
+    let watchdog: ProcessWatchdog;
+    const stopWatchdog = () => {
+        if (!stopped) {
+            stopped = true;
+            watchdog.stop();
+        }
+    };
     const control: ProcessControl = {
-        abort:  () => { try { process.kill(proc.pid, "SIGCONT"); } catch {} proc.kill(9); },
-        pause:  () => { try { process.kill(proc.pid, "SIGSTOP"); } catch {} },
-        resume: () => { try { process.kill(proc.pid, "SIGCONT"); } catch {} },
+        abort:  () => {
+            stopWatchdog();
+            try { process.kill(proc.pid, "SIGCONT"); } catch {}
+            try { proc.kill(9); } catch {}
+        },
+        pause:  () => {
+            if (!paused) {
+                paused = true;
+                watchdog.suspend();
+                try { process.kill(proc.pid, "SIGSTOP"); } catch {}
+            }
+        },
+        resume: () => {
+            if (paused) {
+                paused = false;
+                watchdog.resume();
+                try { process.kill(proc.pid, "SIGCONT"); } catch {}
+            }
+        },
     };
 
-    // Drain stderr in background to prevent pipe buffer saturation (64KB).
-    // If claude blocks on a stderr write, stdout stalls and we hang.
-    // Uses a reader (not Response) so we can cancel it — orphaned child
-    // processes inherit pipe fds and keep them open after claude exits.
     let stderrText = "";
     const stderrReader = proc.stderr.getReader();
     const stderrDrain = (async () => {
@@ -218,81 +256,82 @@ async function generate(
     })();
 
     const reader = proc.stdout.getReader();
-
-    // Timeout backstop: kill the process AND cancel both readers.
-    // Both are needed because orphaned child processes can hold pipes open.
-    // Each op is wrapped so one failing (e.g. proc already dead) doesn't
-    // skip the other cancellations.
-    const timer = setTimeout(() => {
+    let timedOut = false;
+    let lastEvent = "no valid event";
+    watchdog = new ProcessWatchdog(timeout, (label, inactivityMs) => {
+        timedOut = true;
+        stopWatchdog();
         try { proc.kill(9); } catch {}
         try { reader.cancel(); } catch {}
         try { stderrReader.cancel(); } catch {}
-    }, timeout);
+        lastEvent = `${label} (${inactivityMs}ms)`;
+    });
+    watchdog.activity("spawn");
     const decoder = new TextDecoder();
     let buffer = "";
     let sessionId: string | undefined;
     let gotResult = false;
 
+    const handleLine = (line: string) => {
+        const parsed = parseClaudeObject(line);
+        if (!parsed.valid) return;
+        lastEvent = parsed.label;
+        watchdog.activity(parsed.label);
+        if (!sessionId && line.includes('"session_id"')) {
+            try { sessionId = JSON.parse(line).session_id; } catch {}
+        }
+        if (parsed.event) {
+            onEvent(parsed.event, control);
+            if (parsed.event.type === "result") gotResult = true;
+        }
+    };
+
     try {
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
-
             buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split("\n");
             buffer = lines.pop() || "";
-
             for (const line of lines) {
-                // Grab session_id from init event (first line) before parsing
-                if (!sessionId && line.includes('"session_id"')) {
-                    try { sessionId = JSON.parse(line).session_id; } catch {}
-                }
-                const event = parseNdjsonLine(line);
-                if (event) {
-                    onEvent(event, control);
-                    if (event.type === "result") gotResult = true;
-                }
+                handleLine(line);
+                if (gotResult) break;
             }
-            // result event = done, don't wait for process to linger
             if (gotResult) break;
         }
-
-        // Flush remaining buffer — if the last line had no trailing \n,
-        // it's still sitting in buffer and was never parsed.
-        if (buffer && !gotResult) {
-            if (!sessionId && buffer.includes('"session_id"')) {
-                try { sessionId = JSON.parse(buffer).session_id; } catch {}
-            }
-            const event = parseNdjsonLine(buffer);
-            if (event) {
-                onEvent(event, control);
-                if (event.type === "result") gotResult = true;
-            }
-        }
+        if (buffer && !gotResult) handleLine(buffer);
     } finally {
-        // gotResult path cancels reader below (cancel releases the lock).
-        // All other paths: stream ended naturally or was cancelled by timeout.
-        if (!gotResult) reader.releaseLock();
+        // Keep the reader locked until cleanup cancellation; cancel releases it.
     }
 
     if (gotResult) {
-        clearTimeout(timer);
-        proc.kill(9);
-        reader.cancel();        // close stdout pipe fd — orphaned agent children keep it open
-        stderrReader.cancel();
+        stopWatchdog();
+        const exited = await Promise.race([
+            proc.exited,
+            new Promise<null>(r => setTimeout(() => r(null), 500)),
+        ]);
+        if (exited === null) { try { proc.kill(9); } catch {} }
+        try { reader.cancel(); } catch {}
+        try { stderrReader.cancel(); } catch {}
         return { ok: true, sessionId };
     }
 
-    // No result event — wait for process to finish, with timeout as backstop.
     const exitCode = await proc.exited;
-    clearTimeout(timer);
-    // Give stderr a moment to flush, then bail
+    stopWatchdog();
     await Promise.race([stderrDrain, new Promise(r => setTimeout(r, 500))]);
+    try { reader.cancel(); } catch {}
+    try { stderrReader.cancel(); } catch {}
 
+    if (timedOut) {
+        return {
+            ok: false,
+            sessionId,
+            error: `claude stalled after ${timeout}ms of inactivity (last valid event: ${lastEvent})`,
+        };
+    }
     if (exitCode !== 0) {
         return { ok: false, sessionId, error: stderrText || `claude exited with code ${exitCode}` };
     }
-
     return { ok: true, sessionId };
 }
 

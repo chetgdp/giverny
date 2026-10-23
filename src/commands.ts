@@ -85,7 +85,13 @@ function parseCommand(cmd: string): ParsedCommand {
         return { name, arg: argParts.join(" "), remainder: "", isLocal };
     }
 
-    const arity = TWO_ARG_COMMANDS.has(name) ? 2 : ONE_ARG_COMMANDS.has(name) ? 1 : 0;
+    const arity = name === "timeout" && parts.length === 1
+        ? 0
+        : TWO_ARG_COMMANDS.has(name)
+            ? 2
+            : ONE_ARG_COMMANDS.has(name)
+                ? 1
+                : 0;
     let isLocal = false;
     let consumed = 1; // command name
     let argsConsumed = 0;
@@ -172,6 +178,8 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
             console.log(`  tools:   ${cfg.tools}${sourceTag(sources.tools)}`);
             console.log(`  output:  ${cfg.output}${sourceTag(sources.output)}`);
             console.log(`  session: ${cfg.session}${sourceTag(sources.session)}`);
+            const timeout = cfg.timeout ?? CONFIG_DEFAULTS.timeout;
+            console.log(`  timeout: ${timeout === 0 ? "off" : `${timeout}s`}${sourceTag(sources.timeout)}`);
             if (cfg.systemPrompt && cfg.systemPrompt !== "default") {
                 const display = cfg.systemPrompt.length > 40 ? cfg.systemPrompt.slice(0, 40) + "…" : cfg.systemPrompt;
                 console.log(`  prompt:  ${display}${sourceTag(sources.systemPrompt)}`);
@@ -425,24 +433,27 @@ export async function handleSlashCommand(cmd: string, bridge: Bridge): Promise<s
                 return true;
             }
             await saveConfig({ session: s }, isLocal);
-            const where = isLocal ? "local" : "global";
-            console.log(`session: ${s} ${DIM}(${where})${RESET}`);
+            console.log(`session: ${s} ${DIM}(${isLocal ? "local" : "global"})${RESET}`);
             return chainRemainder(remainder, bridge);
         }
         case "timeout": {
             if (!arg) {
-                console.log(`timeout: ${cfg.timeout || CONFIG_DEFAULTS.timeout}s${sourceTag(sources.timeout)}`);
-                console.log(`  /timeout <seconds> [--local]`);
+                const timeout = cfg.timeout ?? CONFIG_DEFAULTS.timeout;
+                console.log(`inactivity timeout: ${timeout === 0 ? "off" : `${timeout}s`}${sourceTag(sources.timeout)}`);
                 return chainRemainder(remainder, bridge);
             }
-            const secs = parseInt(arg);
-            if (isNaN(secs) || secs < 10) {
-                console.log(`${RED}timeout must be >= 10 seconds${RESET}`);
+            if (!/^(?:0|[1-9]\d*)$/.test(arg)) {
+                console.log(`${RED}timeout must be 0 or >= 10 seconds${RESET}`);
+                return true;
+            }
+            const secs = Number(arg);
+            if (secs !== 0 && secs < 10) {
+                console.log(`${RED}timeout must be 0 or >= 10 seconds${RESET}`);
                 return true;
             }
             await saveConfig({ timeout: secs }, isLocal);
             const where = isLocal ? "local" : "global";
-            console.log(`timeout: ${secs}s ${DIM}(${where})${RESET}`);
+            console.log(`timeout: ${secs === 0 ? "off" : `${secs}s`} ${DIM}(${where})${RESET}`);
             return chainRemainder(remainder, bridge);
         }
         case "prompt": {

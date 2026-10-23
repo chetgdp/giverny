@@ -4,8 +4,10 @@
 import { join } from "path";
 import { readFileSync } from "fs";
 
-// Bridge-layer env overrides (used by bridge.ts when opts don't specify)
-export const DEFAULT_TIMEOUT = parseInt(process.env.CLAUDE_TIMEOUT || "120000");
+// Bridge-layer inactivity override (milliseconds).
+export const DEFAULT_INACTIVITY_TIMEOUT_MS = parseInt(
+    process.env.GIVERNY_INACTIVITY_TIMEOUT || "120000",
+);
 export const DEFAULT_EFFORT = process.env.CLAUDE_EFFORT || "high";
 
 // Shared paths -------------------------------------------------------------- /
@@ -59,7 +61,7 @@ export interface ShellConfig {
     tools?: string;
     output?: string;
     session?: string;
-    timeout?: number;       // seconds — max wall time per invocation (default 120)
+    timeout?: number;       // seconds — inactivity timeout (default 120)
     systemPrompt?: string;  // "default" | "none" | custom string (non-agentLoop backends only)
     // Backend-specific (resolved at load time from sub-objects)
     url?: string;

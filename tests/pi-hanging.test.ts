@@ -40,6 +40,7 @@ const TOOL_RESULT_LINE = JSON.stringify({
 });
 const TURN_END = JSON.stringify({ type: "turn_end" });
 const AGENT_END = JSON.stringify({ type: "agent_end", messages: [] });
+const AGENT_SETTLED = JSON.stringify({ type: "agent_settled" });
 const ERROR_LINE = JSON.stringify({
     type: "message_end",
     message: { role: "assistant", content: [], stopReason: "error", errorMessage: "provider blew up" },
@@ -70,7 +71,7 @@ async function runGenerate(timeoutMs = 5000): Promise<{
     const events: BridgeEvent[] = [];
     const result = await Promise.race([
         piBackend.generate(
-            { prompt: "test", timeout: timeoutMs },
+            { prompt: "test", inactivityTimeoutMs: timeoutMs },
             (event) => { events.push(event); },
         ),
         new Promise<never>((_, reject) =>
@@ -88,7 +89,7 @@ describe("pi backend hanging scenarios", () => {
             echo '${HEADER}'
             echo '${ASSISTANT_LINE}'
             echo '${TURN_END}'
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 
@@ -115,7 +116,7 @@ describe("pi backend hanging scenarios", () => {
             echo '${TURN_END}'
             echo '${ASSISTANT_LINE}'
             echo '${TURN_END}'
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 
@@ -134,7 +135,7 @@ describe("pi backend hanging scenarios", () => {
             echo '${HEADER}'
             dd if=/dev/zero bs=1024 count=100 2>/dev/null | tr '\\0' 'x' >&2
             echo '${ASSISTANT_LINE}'
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 
@@ -148,7 +149,7 @@ describe("pi backend hanging scenarios", () => {
         writeFakePi(`
             echo '${HEADER}'
             echo '${ERROR_LINE}'
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 
@@ -185,7 +186,7 @@ describe("pi backend hanging scenarios", () => {
         writeFakePi(`
             echo '${HEADER}'
             echo '${ASSISTANT_LINE}'
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             sleep 30
         `);
 
@@ -208,7 +209,7 @@ describe("pi backend hanging scenarios", () => {
 
         const { ok, error } = await runGenerate(2000);
         expect(ok).toBe(false);
-        expect(error).toContain("timed out");
+        expect(error).toContain("stalled");
     });
 
     it("no trailing newline on last line", async () => {
@@ -231,7 +232,7 @@ describe("pi backend hanging scenarios", () => {
             echo 'not json at all'
             echo '${ASSISTANT_LINE}'
             echo '{"type":"queue_update","data":"ignored"}'
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 
@@ -239,6 +240,85 @@ describe("pi backend hanging scenarios", () => {
         expect(ok).toBe(true);
         expect(events.some(e => e.type === "assistant")).toBe(true);
         expect(events.some(e => e.type === "result")).toBe(true);
+    });
+    it("disabled timeout permits silent process until settlement", async () => {
+        writeFakePi(`
+            echo '${HEADER}'
+            echo '${ASSISTANT_LINE}'
+            sleep 0.25
+            echo '${AGENT_SETTLED}'
+            exit 0
+        `);
+        const { ok } = await runGenerate(0);
+        expect(ok).toBe(true);
+    });
+
+    it("silent process stalls when permission control is not paused", async () => {
+        writeFakePi(`
+            echo '${HEADER}'
+            echo '${ASSISTANT_LINE}'
+            sleep 0.25
+            echo '${AGENT_SETTLED}'
+            exit 0
+        `);
+        const { ok, error } = await runGenerate(100);
+        expect(ok).toBe(false);
+        expect(error).toContain("stalled");
+    });
+    it("valid activity can exceed the inactivity interval", async () => {
+        writeFakePi(`
+            echo '${HEADER}'
+            echo '${ASSISTANT_LINE}'
+            sleep 0.03
+            echo '{"type":"message_update","delta":"x"}'
+            sleep 0.03
+            echo '{"type":"message_update","delta":"y"}'
+            echo '${AGENT_SETTLED}'
+            exit 0
+        `);
+        const { ok } = await runGenerate(100);
+        expect(ok).toBe(true);
+    });
+
+    it("malformed noise does not reset inactivity", async () => {
+        writeFakePi(`
+            echo '${HEADER}'
+            echo '${ASSISTANT_LINE}'
+            sleep 0.2
+            echo '{not valid}'
+            sleep 0.2
+        `);
+        const { ok, error } = await runGenerate(100);
+        expect(ok).toBe(false);
+        expect(error).toContain("message_end");
+    });
+
+    it("retry delay defers the inactivity deadline", async () => {
+        writeFakePi(`
+            echo '${HEADER}'
+            echo '{"type":"auto_retry_start","delayMs":250}'
+            sleep 0.15
+            echo '${ASSISTANT_LINE}'
+            echo '${AGENT_SETTLED}'
+            exit 0
+        `);
+        const { ok } = await runGenerate(100);
+        expect(ok).toBe(true);
+    });
+
+    it("agent_end is nonterminal before continuation and settlement", async () => {
+        writeFakePi(`
+            echo '${HEADER}'
+            echo '${ASSISTANT_LINE}'
+            echo '{"type":"agent_end","willRetry":false}'
+            sleep 0.05
+            echo '${ASSISTANT_LINE}'
+            echo '${AGENT_SETTLED}'
+            exit 0
+        `);
+        const { ok, events } = await runGenerate(100);
+        expect(ok).toBe(true);
+        expect(events.some(event => event.type === "result")).toBe(true);
     });
 
     it("orphan children holding pipes do not delay generate()", async () => {
@@ -252,7 +332,7 @@ describe("pi backend hanging scenarios", () => {
                     sleep 0.5
                 done
             ) &
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 
@@ -281,7 +361,7 @@ describe("pi backend hanging scenarios", () => {
                     sleep 0.5
                 done
             ) &
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 
@@ -289,7 +369,7 @@ describe("pi backend hanging scenarios", () => {
         const piSrc = join(import.meta.dir, "..", "src", "pi.ts");
         writeFileSync(driver, `
             import { piBackend } from ${JSON.stringify(piSrc)};
-            const result = await piBackend.generate({ prompt: "test", timeout: 5000 }, () => {});
+            const result = await piBackend.generate({ prompt: "test", inactivityTimeoutMs: 5000 }, () => {});
             console.log("DRIVER_DONE " + result.ok);
             // no process.exit — a leaked fd/read would hang the event loop
         `);
@@ -321,7 +401,7 @@ describe("pi backend hanging scenarios", () => {
             echo '${JSON.stringify({ type: "agent_end", messages: [], willRetry: true })}'
             echo '${ASSISTANT_LINE}'
             echo '${TURN_END}'
-            echo '${AGENT_END}'
+            echo '${AGENT_SETTLED}'
             exit 0
         `);
 

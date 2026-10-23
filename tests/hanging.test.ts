@@ -62,7 +62,7 @@ async function runGenerate(timeoutMs = 5000): Promise<{
     const events: BridgeEvent[] = [];
     const result = await Promise.race([
         claudeCodeBackend.generate(
-            { prompt: "test", timeout: timeoutMs },
+            { prompt: "test", inactivityTimeoutMs: timeoutMs },
             (event) => { events.push(event); },
         ),
         new Promise<never>((_, reject) =>
@@ -205,6 +205,21 @@ describe("bridge hanging scenarios", () => {
         expect(events.some(e => e.type === "result")).toBe(true);
     });
 
+    it("valid activity can exceed the total interval", async () => {
+        writeFakeClaude(`
+            echo '${INIT_LINE}'
+            sleep 0.08
+            echo '${ASSISTANT_LINE}'
+            sleep 0.08
+            echo '${RESULT_LINE}'
+            exit 0
+        `);
+
+        const { events, ok } = await runGenerate(100);
+        expect(ok).toBe(true);
+        expect(events.some(e => e.type === "result")).toBe(true);
+    });
+
     // No trailing newline on last line — tests the buffer flush path.
     it("no trailing newline on result line", async () => {
         writeFakeClaude(`
@@ -225,6 +240,19 @@ describe("bridge hanging scenarios", () => {
 
         const { ok } = await runGenerate();
         expect(ok).toBe(true);
+    });
+
+    it("silent process reports the last valid event", async () => {
+        writeFakeClaude(`
+            echo '${INIT_LINE}'
+            echo '${ASSISTANT_LINE}'
+            sleep 60
+        `);
+
+        const { ok, error } = await runGenerate(200);
+        expect(ok).toBe(false);
+        expect(error).toContain("claude stalled after 200ms of inactivity");
+        expect(error).toContain("last valid event: assistant");
     });
 
     // Timeout fires for a truly stuck process.

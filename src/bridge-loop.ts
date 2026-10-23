@@ -33,7 +33,7 @@ export interface RunOptions {
     model?:         string;
     systemPrompt?:  string;
     sessionId?:     string;
-    timeout?:       number;
+    inactivityTimeoutMs?: number;
     cwd?:           string;
     options?:       Record<string, any>;
 }
@@ -246,7 +246,7 @@ export class Bridge {
             model: opts.model,
             systemPrompt: opts.systemPrompt,
             sessionId: opts.sessionId,
-            timeout: opts.timeout,
+            inactivityTimeoutMs: opts.inactivityTimeoutMs,
             cwd: opts.cwd,
             options: opts.options,
         };

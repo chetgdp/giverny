@@ -150,11 +150,11 @@ describe("createPiParser", () => {
         expect(p.handleLine(JSON.stringify({ type: "agent_start" }))).toBeNull();
     });
 
-    it("settles on agent_end without willRetry, not on retry", () => {
+    it("settles only on agent_settled, not agent_end", () => {
         const p = createPiParser();
-        p.handleLine(JSON.stringify({ type: "agent_end", messages: [], willRetry: true }));
+        p.handleLine(JSON.stringify({ type: "agent_end", messages: [], willRetry: false }));
         expect(p.settled()).toBe(false);
-        p.handleLine(JSON.stringify({ type: "agent_end", messages: [] }));
+        p.handleLine(JSON.stringify({ type: "agent_settled" }));
         expect(p.settled()).toBe(true);
     });
 

@@ -12,7 +12,8 @@
 * Used via Bridge (bridge-loop.ts) by shell.ts.
 */
 
-import { DEFAULT_EFFORT, DEFAULT_TIMEOUT } from "./config";
+import { DEFAULT_EFFORT, DEFAULT_INACTIVITY_TIMEOUT_MS } from "./config";
+import { ProcessWatchdog } from "./process-watchdog";
 import type {
     Backend,
     BackendInfo,
@@ -73,14 +74,13 @@ export function buildPiArgs(opts: GenerateOptions): string[] {
 // NDJSON stream parser ------------------------------------------------------ //
 // Stateful (unlike bridge.ts's pure line parser): the ResultEvent is
 // synthesized at stream end from accumulated messages/usage/turns.
-
 export interface PiParser {
     handleLine(line: string): BridgeEvent | null;
+    handleEvent(event: any): BridgeEvent | null;
     finish(durationMs: number): ResultEvent | null;
     sessionId(): string | undefined;
-    // true once agent_end without willRetry was seen — the run is complete
-    // even if the stdout pipe is still held open by an orphaned child
     settled(): boolean;
+    lastEvent(): string;
 }
 
 export function createPiParser(): PiParser {
@@ -93,109 +93,111 @@ export function createPiParser(): PiParser {
     let lastText = "";
     let lastStopReason = "";
     let lastErrorMessage = "";
+    let lastEvent = "spawn";
 
-    function handleLine(line: string): BridgeEvent | null {
-        if (!line.trim()) return null;
+    function handleEvent(event: unknown): BridgeEvent | null {
+        if (!event || typeof event !== "object") return null;
+        const record = event as Record<string, unknown>;
+        if (typeof record.type !== "string") return null;
+        lastEvent = record.type;
 
-        let event: any;
-        try {
-            event = JSON.parse(line);
-        } catch {
+        if (record.type === "session" && typeof record.id === "string") {
+            sessionId = record.id;
             return null;
         }
-
-        if (event.type === "session" && event.id) {
-            sessionId = event.id;
-            return null;
-        }
-
-        if (event.type === "turn_end") {
+        if (record.type === "turn_end") {
             turns++;
             return null;
         }
-
-        if (event.type === "agent_end" && !event.willRetry) {
+        if (record.type === "agent_settled") {
             settled = true;
             return null;
         }
-
-        if (event.type === "message_end" && event.message?.role === "assistant") {
-            const msg = event.message;
+        if (record.type === "message_end") {
+            const message = record.message;
+            if (!message || typeof message !== "object") return null;
+            const msg = message as Record<string, unknown>;
+            if (msg.role !== "assistant") return null;
             sawAssistant = true;
-            lastStopReason = msg.stopReason || "";
-            lastErrorMessage = msg.errorMessage || "";
-            if (msg.usage) {
-                // cache reads/writes occupy context, count them as input
-                inputTokens += (msg.usage.input || 0)
-                    + (msg.usage.cacheRead || 0)
-                    + (msg.usage.cacheWrite || 0);
-                outputTokens += msg.usage.output || 0;
+            lastStopReason = typeof msg.stopReason === "string" ? msg.stopReason : "";
+            lastErrorMessage = typeof msg.errorMessage === "string" ? msg.errorMessage : "";
+            const usage = msg.usage;
+            if (usage && typeof usage === "object") {
+                const u = usage as Record<string, unknown>;
+                inputTokens += (typeof u.input === "number" ? u.input : 0)
+                    + (typeof u.cacheRead === "number" ? u.cacheRead : 0)
+                    + (typeof u.cacheWrite === "number" ? u.cacheWrite : 0);
+                outputTokens += typeof u.output === "number" ? u.output : 0;
             }
-
+            const content = Array.isArray(msg.content) ? msg.content : [];
             const blocks: ContentBlock[] = [];
             let text = "";
-            for (const block of msg.content || []) {
-                if (block.type === "text" && block.text) {
+            for (const item of content) {
+                if (!item || typeof item !== "object") continue;
+                const block = item as Record<string, unknown>;
+                if (block.type === "text" && typeof block.text === "string" && block.text) {
                     blocks.push({ type: "text", text: block.text });
                     text += block.text;
-                }
-                if (block.type === "toolCall") {
+                } else if (block.type === "toolCall" && typeof block.name === "string") {
                     blocks.push({
                         type: "tool_use",
-                        id: block.id,
+                        id: typeof block.id === "string" ? block.id : undefined,
                         name: block.name,
-                        input: block.arguments || {},
+                        input: block.arguments && typeof block.arguments === "object"
+                            ? block.arguments as Record<string, unknown> : {},
                     });
                 }
-                // thinking blocks dropped
             }
-            // Track text only from content-bearing messages so a trailing
-            // zero-content retry/error message doesn't wipe the answer.
             if (text) lastText = text;
-
-            // pi's auto-retry produces zero-content error messages before
-            // retrying; don't surface those as assistant turns.
-            if (blocks.length === 0) return null;
-            return { type: "assistant", blocks };
+            return blocks.length ? { type: "assistant", blocks } : null;
         }
-
-        if (event.type === "tool_execution_end") {
-            const content = (event.result?.content || [])
-                .filter((c: any) => c.type === "text")
-                .map((c: any) => c.text || "")
-                .join("\n");
+        if (record.type === "tool_execution_end") {
+            const result = record.result;
+            const resultRecord = result && typeof result === "object"
+                ? result as Record<string, unknown> : {};
+            const content = Array.isArray(resultRecord.content)
+                ? resultRecord.content.filter((item): item is Record<string, unknown> =>
+                    !!item && typeof item === "object" && (item as Record<string, unknown>).type === "text")
+                    .map(item => typeof item.text === "string" ? item.text : "").join("\n")
+                : "";
             return {
                 type: "tool_result",
-                toolUseId: event.toolCallId || "",
-                content,
-                stdout: content,   // pi has no stdout/stderr split
-                stderr: "",
-                isError: !!event.isError,
+                toolUseId: typeof record.toolCallId === "string" ? record.toolCallId : "",
+                content, stdout: content, stderr: "", isError: record.isError === true,
             };
         }
-
-        // message_update deltas, turn/agent lifecycle, retries: ignored
         return null;
+    }
+
+    function handleLine(line: string): BridgeEvent | null {
+        if (!line.trim()) return null;
+        try {
+            return handleEvent(JSON.parse(line) as unknown);
+        } catch {
+            return null;
+        }
     }
 
     function finish(durationMs: number): ResultEvent | null {
         if (!sawAssistant) return null;
         const isError = lastStopReason === "error" || lastStopReason === "aborted";
         return {
-            type: "result",
-            sessionId: sessionId || null,
-            isError,
-            // on error, the reason beats stale mid-run text
+            type: "result", sessionId: sessionId || null, isError,
             result: isError ? (lastErrorMessage || lastText) : lastText,
-            numTurns: turns || 1,
-            durationMs,
+            numTurns: turns || 1, durationMs,
             usage: { input_tokens: inputTokens, output_tokens: outputTokens },
             permissionDenials: [],
         };
     }
 
-    return { handleLine, finish, sessionId: () => sessionId, settled: () => settled };
+    return {
+        handleLine, handleEvent, finish,
+        sessionId: () => sessionId,
+        settled: () => settled,
+        lastEvent: () => lastEvent,
+    };
 }
+
 
 // Generate ---------------------------------------------------------------- //
 // Spawns pi, streams NDJSON events via callback. Returns ok/error.
@@ -214,7 +216,7 @@ async function generate(
     }
 
     const args = buildPiArgs(opts);
-    const timeout = opts.timeout ?? DEFAULT_TIMEOUT;
+    const timeout = opts.inactivityTimeoutMs ?? DEFAULT_INACTIVITY_TIMEOUT_MS;
     const startedAt = Date.now();
 
     const bin = process.env.GIVERNY_PI_BIN || "pi";
@@ -224,16 +226,25 @@ async function generate(
         stdout: "pipe",
         stderr: "pipe",
     });
-
+    const reader = proc.stdout.getReader();
+    let timedOut = false;
+    let watchdog: ProcessWatchdog;
     const control: ProcessControl = {
-        abort:  () => { try { process.kill(proc.pid, "SIGCONT"); } catch {} proc.kill(9); },
-        pause:  () => { try { process.kill(proc.pid, "SIGSTOP"); } catch {} },
-        resume: () => { try { process.kill(proc.pid, "SIGCONT"); } catch {} },
+        abort: () => {
+            watchdog.stop();
+            try { process.kill(proc.pid, "SIGCONT"); } catch {}
+            try { proc.kill(9); } catch {}
+        },
+        pause: () => {
+            watchdog.suspend();
+            try { process.kill(proc.pid, "SIGSTOP"); } catch {}
+        },
+        resume: () => {
+            try { process.kill(proc.pid, "SIGCONT"); } catch {}
+            watchdog.resume();
+        },
     };
-
     // Drain stderr in background to prevent pipe buffer saturation (64KB).
-    // Uses a reader (not Response) so it can be cancelled — orphaned child
-    // processes inherit pipe fds and keep them open after pi exits.
     let stderrText = "";
     const stderrReader = proc.stderr.getReader();
     const stderrDrain = (async () => {
@@ -248,18 +259,16 @@ async function generate(
         } catch {}
         stderrText = chunks.join("");
     })();
-
-    const reader = proc.stdout.getReader();
-
-    // Timeout backstop: kill the process AND cancel both readers.
-    // Each op is wrapped so one failing doesn't skip the others.
-    let timedOut = false;
-    const timer = setTimeout(() => {
+    watchdog = new ProcessWatchdog(timeout, (label, inactivityMs) => {
         timedOut = true;
         try { proc.kill(9); } catch {}
         try { reader.cancel(); } catch {}
         try { stderrReader.cancel(); } catch {}
-    }, timeout);
+        watchdog.stop();
+        stallLabel = `${label}:${inactivityMs}`;
+    });
+    watchdog.activity("spawn");
+    let stallLabel = "spawn";
 
     const decoder = new TextDecoder();
     const parser = createPiParser();
@@ -268,69 +277,71 @@ async function generate(
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
-
         for (const line of lines) {
-            const event = parser.handleLine(line);
+            let parsed: unknown;
+            try { parsed = JSON.parse(line) as unknown; } catch { continue; }
+            if (parsed && typeof parsed === "object"
+                && typeof (parsed as Record<string, unknown>).type === "string") {
+                const record = parsed as Record<string, unknown>;
+                const type = record.type as string;
+                if (type === "auto_retry_start" && typeof record.delayMs === "number") {
+                    watchdog.defer(record.delayMs, "auto_retry");
+                } else {
+                    const tool = typeof record.toolName === "string"
+                        ? `:${record.toolName}` : "";
+                    watchdog.activity(`${type}${tool}`);
+                }
+            }
+            const event = parser.handleEvent(parsed);
             if (event) onEvent(event, control);
+            if (parser.settled()) break;
         }
-        // agent_end = run complete; don't wait for stream end — an orphaned
-        // child holding the stdout pipe would stall it until the timeout
         if (parser.settled()) break;
     }
-
-    // Flush remaining buffer — if the last line had no trailing \n,
-    // it's still sitting in buffer and was never parsed.
     if (buffer && !parser.settled()) {
-        const event = parser.handleLine(buffer);
+        let parsed: unknown;
+        try { parsed = JSON.parse(buffer) as unknown; } catch { parsed = null; }
+        if (parsed && typeof parsed === "object"
+            && typeof (parsed as Record<string, unknown>).type === "string") {
+            watchdog.activity((parsed as Record<string, unknown>).type as string);
+        }
+        const event = parser.handleEvent(parsed);
         if (event) onEvent(event, control);
     }
-
     const sessionId = parser.sessionId();
-
     if (parser.settled()) {
-        // Disarm the timeout first — if it fired inside the grace window it
-        // would kill(9) pi mid shutdown, defeating the grace period.
-        clearTimeout(timer);
-        // Grace period so pi can finish session writes and exit on its own,
-        // then kill — a lingering process must not hold generate() hostage.
+        watchdog.stop();
         const exited = await Promise.race([
             proc.exited,
-            new Promise<null>(r => setTimeout(() => r(null), 500)),
+            new Promise<null>(resolve => setTimeout(() => resolve(null), 500)),
         ]);
         if (exited === null) { try { proc.kill(9); } catch {} }
-        try { reader.cancel(); } catch {}       // close stdout pipe fd — orphaned children keep it open
+        try { reader.cancel(); } catch {}
         try { stderrReader.cancel(); } catch {}
-
-        // pi's json mode exits 0 even when the model errored — the synthesized
-        // result carries isError from the last assistant stopReason.
         const result = parser.finish(Date.now() - startedAt);
         if (result) onEvent(result, control);
         return { ok: true, sessionId };
     }
-
-    // No agent_end seen: stream ended on its own (pi died, fake test binary,
-    // or timeout cancelled the readers). Exit code decides.
     const exitCode = await proc.exited;
-    clearTimeout(timer);
-    // Give stderr a moment to flush, then bail
-    await Promise.race([stderrDrain, new Promise(r => setTimeout(r, 500))]);
+    watchdog.stop();
+    await Promise.race([stderrDrain, new Promise(resolve => setTimeout(resolve, 500))]);
     try { reader.cancel(); } catch {}
     try { stderrReader.cancel(); } catch {}
-
     if (timedOut) {
-        return { ok: false, sessionId, error: `pi timed out after ${timeout}ms` };
+        return {
+            ok: false,
+            sessionId,
+            error: `pi stalled after ${timeout}ms of inactivity after ${stallLabel}`,
+        };
     }
     if (exitCode !== 0) {
         return { ok: false, sessionId, error: stderrText || `pi exited with code ${exitCode}` };
     }
-
     const result = parser.finish(Date.now() - startedAt);
     if (result) onEvent(result, control);
-
     return { ok: true, sessionId };
 }
 

@@ -311,7 +311,9 @@ Promise<ShellResult> {
             model,
             systemPrompt,
             sessionId: sessionId || undefined,
-            timeout: cfg.timeout ? cfg.timeout * 1000 : undefined,
+            inactivityTimeoutMs: cfg.timeout === undefined
+                ? undefined
+                : cfg.timeout * 1000,
             options: {
                 effort,
                 perms: bridgePerms,

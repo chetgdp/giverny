@@ -33,8 +33,8 @@ export interface GenerateOptions {
     prompt:         string;
     model?:         string;
     systemPrompt?:  string;
-    sessionId?:     string;
-    timeout?:       number;
+    inactivityTimeoutMs?: number;
+    sessionId?:      string;
     cwd?:           string;
     // Backend-specific options. Claude puts effort, perms, tools filter here.
     // Completions backend puts temperature, top_p, tool schemas here.

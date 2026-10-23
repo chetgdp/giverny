@@ -36,7 +36,7 @@ Non-agentLoop backends use `src/tools.ts` for tool definitions and execution (si
 
 - `pi --mode json` emits NDJSON on stdout; stdout is guarded (only event lines reach it), diagnostics go to stderr. Prompt is passed via stdin. Do NOT pass `-p`: it greedily consumes the next argv as the prompt.
 - Line 1 is a session header `{type:"session", version:3, id, timestamp, cwd}` (may be absent with `--no-session`).
-- Events: `agent_start`, `turn_start`, `message_start/update/end`, `turn_end`, `agent_end {messages, willRetry}`, `agent_settled`, `tool_execution_start/update/end`, plus housekeeping. No terminal result event — `agent_end` without `willRetry` means the run is done.
+- Events: `agent_start`, `turn_start`, `message_start/update/end`, `turn_end`, `agent_end {messages, willRetry}`, `agent_settled`, `tool_execution_start/update/end`, plus housekeeping. No terminal result event. Only `agent_settled` means the run is done; `agent_end` is nonterminal retry and result metadata.
 - Assistant message (in `message_end`, discriminate on `message.role === "assistant"`): `{role, content: [{type:"text"|"thinking"|"toolCall"}], usage {input, output, cacheRead, cacheWrite}, stopReason: stop|length|toolUse|error|aborted, errorMessage?}`. toolCall blocks: `{id, name, arguments}`.
 - `tool_execution_end`: `{toolCallId, toolName, result: {content:[{type:"text",...}]}, isError}`. No stdout/stderr split.
 - Exit code 0 even when the model errored — errors only surface via `stopReason`/`errorMessage`.
@@ -106,16 +106,26 @@ Pure functions in `protocol.ts` and `shell-utils.ts` can be imported without sid
 
 ## Process lifecycle (do not break)
 
-`src/bridge.ts` spawns `claude -p` and reads NDJSON from stdout. Four invariants that prevent hanging:
+The backends use an inactivity watchdog, not an absolute wall-clock limit. The
+watchdog is reset by valid protocol activity and fires only after the configured
+interval with no valid event. A timeout of `0` disables the watchdog.
 
 1. **Stderr must drain in background** — started before the read loop. If claude blocks on a stderr write (64KB pipe buffer full), stdout stalls. The drain runs as a fire-and-forget promise.
-2. **Timeout must cancel the stdout reader** — `proc.kill(9)` alone is not enough. Orphaned child processes (tool executions) inherit pipe fds and keep them open. The timeout handler must call both `proc.kill(9)` AND `reader.cancel()` to break the read loop. Each op is wrapped in try/catch so one failing doesn't skip the others.
-3. **gotResult path must cancel readers and return immediately** — after receiving a result event, kill the process, `reader.cancel()` stdout (not just `releaseLock` — that leaves the pipe fd open), `stderrReader.cancel()`, and return. Do not await `proc.exited` or `stderrDrain` — orphaned agent children inherit pipe fds and keep them open indefinitely, which holds the event loop alive and prevents the process from exiting.
-4. **Shell main must `process.exit(0)` explicitly** — even with the gotResult cancels, the Bun event loop stays alive because orphaned tool-runner children hold the inherited stdio pipe fds. Without the explicit exit, the terminal never gets control back and the user sees a stuck spinner frame after output. Server mode is long-running and doesn't need this.
+2. **Inactivity cleanup must cancel the stdout reader** — `proc.kill(9)` alone is not enough. Orphaned child processes (tool executions) inherit pipe fds and keep them open. The watchdog cleanup must call both `proc.kill(9)` AND `reader.cancel()` to break the read loop. Each op is wrapped in try/catch so one failing doesn't skip the others.
+3. **Logical settlement precedes exit cleanup** — Claude settles on its `result` event; Pi settles on `agent_settled`. Settlement must stop the watchdog before the exit grace period.
+4. **Exit grace is separate from forced cleanup** — after logical settlement, allow the short exit grace race against `proc.exited`; force-kill only if still running, then cancel both readers while the lock is held.
+5. **Settled paths must return immediately** — do not await `proc.exited` or `stderrDrain`; orphaned agent children inherit pipe fds and keep them open indefinitely, which holds the event loop alive and prevents the process from exiting.
+6. **Shell main must `process.exit(0)` explicitly** — even with the reader cancels, the Bun event loop can stay alive because orphaned tool-runner children hold inherited stdio pipe fds. Without the explicit exit, the terminal never gets control back and the user sees a stuck spinner frame after output. Server mode is long-running and doesn't need this.
 
-The `GIVERNY_CLAUDE_BIN` env var overrides the claude binary path (defaults to `"claude"`). Used by tests to inject controlled behavior.
+Pi protocol activity is each complete valid JSON object with a string `type`;
+only `agent_settled` settles the logical run. Claude protocol activity is each
+complete valid JSON event, and `result` remains its settlement event.
 
-`src/pi.ts` follows the same invariants with pi's shape: there is no result event — `agent_end` without `willRetry` is the early-exit signal (invariant 3), and the ResultEvent is synthesized at that point from accumulated state. Settled-path order matters: `clearTimeout` FIRST (an armed timer firing inside the grace window would `kill(9)` pi mid session-write), then a 500ms grace race against `proc.exited`, `kill(9)` only if still running, then cancel both readers while the lock is held. `GIVERNY_PI_BIN` mirrors `GIVERNY_CLAUDE_BIN`.
+`GIVERNY_CLAUDE_BIN` and `GIVERNY_PI_BIN` override backend binaries in tests.
+`GIVERNY_INACTIVITY_TIMEOUT` sets the default watchdog interval in milliseconds.
+The shell `/timeout` command displays seconds, accepts values `>=10`, and
+`/timeout 0` disables the watchdog; values `1`–`9`, negatives, and non-numbers
+are rejected. Persisted shell timeout values remain seconds.
 
 ## Responses API tool call IDs (do not break)
 

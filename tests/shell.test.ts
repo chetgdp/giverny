@@ -211,6 +211,34 @@ describe("handleSlashCommand", () => {
             expect(await handleSlashCommand("/fresh")).toBe(true);
         });
     });
+    // -- inactivity timeout --------------------------------------------------
+    describe("/timeout", () => {
+        it("shows the configured timeout and accepts zero", async () => {
+            clearLog();
+            await handleSlashCommand("/timeout 0");
+            expect(lastLog()).toContain("off");
+            clearLog();
+            await handleSlashCommand("/timeout");
+            expect(lastLog()).toContain("off");
+        });
+
+        it("rejects invalid timeout values", async () => {
+            for (const value of ["1", "9", "-1", "nope"]) {
+                clearLog();
+                await handleSlashCommand(`/timeout ${value}`);
+                expect(lastLog()).toContain("0 or >= 10");
+            }
+        });
+
+        it("persists enabled timeout in seconds", async () => {
+            clearLog();
+            await handleSlashCommand("/timeout 10");
+            expect(lastLog()).toContain("10s");
+            clearLog();
+            await handleSlashCommand("/timeout");
+            expect(lastLog()).toContain("10s");
+        });
+    });
 
     // -- prompt chaining (return string) -------------------------------------
 

@@ -49,9 +49,10 @@ export function printHelp(prefix?: string) {
     console.log("  /quiet /normal /verbose");
     console.log("  /session <mode>           Set session mode");
     console.log("  /fresh /keep");
+    console.log("  /timeout [seconds]        Show/set inactivity timeout (0 disables)");
     console.log("  /tools [list]             Show available tools, or set filter");
-    console.log("  /diff [instruction]       Analyze git diff (default: summarize)");
     console.log("  /compact [focus]          Compact context (focus: what to prioritize)");
+    console.log("  /diff [instruction]       Review the current git diff");
     console.log("  /resume [id] [claude]     List sessions, or resume by number/id");
     console.log("                            Add 'claude' to open in claude code (claude-code backend)");
     console.log("  /export [file]            Export transcript (to file or stdout)");
@@ -68,5 +69,5 @@ export function printHelp(prefix?: string) {
     console.log(`\n${BOLD}Environment${RESET}`);
     console.log("  PORT=8741                 Bridge server port");
     console.log("  CLAUDE_EFFORT=max         Default effort level (levels vary by backend, see /effort)");
-    console.log("  CLAUDE_TIMEOUT=300000     Per-turn timeout in ms");
+    console.log("  GIVERNY_INACTIVITY_TIMEOUT=120000  Default inactivity watchdog interval in ms (0 disables)");
 }
