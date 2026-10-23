@@ -1,5 +1,6 @@
 > [!IMPORTANT]
-> **Giverny source is archived.** The shell mode and general agent harness work continue in my fork of omp, [chetgdp/oh-my-pi](https://github.com/chetgdp/oh-my-pi): type `?` in your shell to prompt a session (see [`packages/shell/README.md`](https://github.com/chetgdp/oh-my-pi/blob/main/packages/shell/README.md)). The voice interface runs through two projects:
+> **Giverny source is archived.** The shell mode and general agent harness work continue in my fork of omp, [chetgdp/oh-my-pi](https://github.com/chetgdp/oh-my-pi): type `?` in your shell to prompt a session (see [`packages/shell/README.md`](https://github.com/chetgdp/oh-my-pi/blob/main/packages/shell/README.md)).
+> The voice interface runs through two projects:
 >
 > - [HeavyETL/otis](https://github.com/HeavyETL/otis), a local dictation daemon for macOS with a command mode
 > - [chetgdp/wren](https://github.com/chetgdp/wren), a local text-to-speech daemon that speaks agent replies

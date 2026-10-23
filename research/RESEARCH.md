@@ -59,28 +59,16 @@ ssize_t write(int fildes, const void *buf, size_t nbyte);
 You write an nbyte buffer to a file descriptor, stdin is 0, stdout is 1, stderr is 2. Very simple, very fast.
 
 
+## program synthesis as infra: pipelines
+the very first thing that triggered this fork of omp was a way to create a tool call that would chain tool calls together rather than making it something the model controls. it was like code. this prompt outputs this, and that output goes into this next tool call, and you programmatically create a chain.
 
+what `workflowz` really is, what the eval tool really is, is neurosymbolic program synthesis, and it's an extremely powerful thing. the model writes the eval program basically. that is a really powerful abstraction. theoretically if i asked a model to workflowz the dialectic, it could come up with something like the dialectic extension.
 
+so naturally we should be looking to freeze workflows. we're doing the same workflow over and over, the model's running the same thing, and we "freeze" it: we simply create an extension out of it. this is how we're just gonna get a model to write extensions. that's what creator mode is ([DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)), just write extensions. the process here is the user asks the model to make an extension, instead of the model just doing it on its own. the `write-extension` skill (`~/.omp/agent/skills/write-extension/SKILL.md`) is that.
 
+what matters is that they're reusable workflows. things that worked really good, but also if i want to write it myself, i can.
 
+pipeline, program? pipeline could be program. sure, it's too broad, but it kind of is that. it's something between pipeline and program. what i do, i call dialogic program synthesis.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+lit review: [omp-fork/neurosymbolic-lit.md](omp-fork/neurosymbolic-lit.md)
 
