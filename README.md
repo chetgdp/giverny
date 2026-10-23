@@ -1,5 +1,10 @@
 > [!IMPORTANT]
-> **Giverny is archived.** Its shell mode and agent harness work continue in my fork of omp, [chetgdp/oh-my-pi](https://github.com/chetgdp/oh-my-pi): type `?` in your shell to prompt a session (see its `packages/shell/README.md`). Voice runs through two companion projects: [HeavyETL/otis](https://github.com/HeavyETL/otis), a local dictation daemon for macOS with a command mode, and [chetgdp/wren](https://github.com/chetgdp/wren), a local text-to-speech daemon that speaks agent replies. This repo now holds the HCI research behind all of them, in **[research/](research/README.md)**. Everything below this note is the original Giverny README.
+> **Giverny source is archived.** The shell mode and general agent harness work continue in my fork of omp, [chetgdp/oh-my-pi](https://github.com/chetgdp/oh-my-pi): type `?` in your shell to prompt a session (see its `packages/shell/README.md`). The voice system runs through two projects:
+>
+> - [HeavyETL/otis](https://github.com/HeavyETL/otis), a local dictation daemon for macOS with a command mode
+> - [chetgdp/wren](https://github.com/chetgdp/wren), a local text-to-speech daemon that speaks agent replies
+>
+> This repo now holds the HCI research behind all of them, in **[research/](research/README.md)**. Everything below this note is the original Giverny README.
 
 # Giverny
 *terminal is computer*
