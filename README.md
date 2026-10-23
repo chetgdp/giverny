@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **Giverny is archived.** Its shell mode and agent harness work continue in my fork of omp, [chetgdp/oh-my-pi](https://github.com/chetgdp/oh-my-pi): type `?` in your shell to prompt a session (see its `packages/shell/README.md`). This repo now holds the HCI research behind both, in **[research/](research/README.md)**. Everything below this note is the original Giverny README.
+
 # Giverny
 *terminal is computer*
 <a href="https://en.wikipedia.org/wiki/Claude_Monet"><img src="assets/giverny_bridge.jpg" title="Claude Monet's painting of the bridge in the garden of his Giverny property" alt="bridge in giverny"></a>
